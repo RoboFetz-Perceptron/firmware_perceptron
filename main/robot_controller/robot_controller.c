@@ -166,7 +166,7 @@ void on_cmd_vel_callback(const geometry_msgs__msg__TwistStamped *msg, void *cont
         return;
     }
 
-    ESP_LOGI(ROBOT_CONTROLLER_LOGGER_TAG, "Set velocities: ml: %f rad/s = %f rev/s, mr: %f rad/s = %f rev/s, steer angle: %f deg", vel_ml, RAD_TO_REV(vel_ml), vel_mr, RAD_TO_REV(vel_mr), RAD_TO_DEG(steer_angle));
+    // ESP_LOGI(ROBOT_CONTROLLER_LOGGER_TAG, "Set velocities: ml: %f rad/s = %f rev/s, mr: %f rad/s = %f rev/s, steer angle: %f deg", vel_ml, RAD_TO_REV(vel_ml), vel_mr, RAD_TO_REV(vel_mr), RAD_TO_DEG(steer_angle));
 }
 
 esp_err_t robot_controller_init(odrive_context_t *odrive_ml_context, odrive_context_t *odrive_mr_context, servo_t *servo_context, EventGroupHandle_t error_handle, EventBits_t error_bit) {
