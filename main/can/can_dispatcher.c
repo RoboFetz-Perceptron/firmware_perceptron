@@ -68,7 +68,6 @@ static void dispatcher_task(void *pv) {
             // Timeout, continue waiting for messages
             continue;
         } else {
-            // TODO: Implement recovery, for now just log the error and break
             ESP_LOGE(CAN_DISPATCHER_TAG, "Failed to receive CAN message: %s", esp_err_to_name(receive_ret));
             break;
         }

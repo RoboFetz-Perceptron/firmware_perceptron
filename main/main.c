@@ -1,8 +1,4 @@
 #include "can/can_interface.h"
-
-// TODO: Make the other modules also interfaces -> better hardware abstraction
-// TODO: We currently expose too many configuration options which might seem overwhelming -> reduce to only the once that make sense
-
 #include "mros/mros.h"
 #include "odrive/odrive.h"
 #include "odrive/odrive_enums.h"
@@ -14,6 +10,7 @@
 
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
+#include <sdkconfig.h>
 
 #define MAIN_TAG "MAIN"
 
@@ -27,8 +24,17 @@
 #define MOTOR_R_INPUT_MODE INPUT_MODE_PASSTHROUGH
 #define MOTOR_R_DIRECTION 1
 
+#ifdef CONFIG_SERVO_GPIO
+#define SERVO_GPIO CONFIG_SERVO_GPIO
+#else
 #define SERVO_GPIO GPIO_NUM_5
-#define SERVO_CALIBRATED_MIDDLE_OFFSET 46 // TODO: Make this configurable through parameter server
+#endif
+
+#ifdef CONFIG_SERVO_CALIBRATED_MIDDLE_OFFSET
+#define SERVO_CALIBRATED_MIDDLE_OFFSET CONFIG_SERVO_CALIBRATED_MIDDLE_OFFSET
+#else
+#define SERVO_CALIBRATED_MIDDLE_OFFSET 46
+#endif
 
 EventGroupHandle_t module_error_event_group = NULL;
 #define ERROR_BIT_CAN BIT0
@@ -170,8 +176,6 @@ void app_main(void) {
     if (module_status_bits & ERROR_BIT_ROBOT_CONTROLLER) {
         ESP_LOGE(MAIN_TAG, "Robot controller error detected");
     }
-
-    // TODO: In the future, we should be able to better recover from errors
 
 error_handling:
     indicator_led_set_status(LED_STATUS_ERROR);

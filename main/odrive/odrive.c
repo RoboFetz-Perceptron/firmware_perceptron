@@ -356,9 +356,6 @@ esp_err_t odrive_set_axis_state(odrive_context_t *context, AxisState axis_state,
     return ESP_OK;
 }
 
-// TODO: Add function to do a full calibration sequence
-
-// TODO: Interface should be cleaned up
 //! This function consumes the queue item
 esp_err_t odrive_get_encoder_estimates(odrive_context_t *context, odrive_encoder_estimates_t *estimates, wallclock_timestamp_t *timestamp, bool consume, TickType_t timeout) {
     if (context == NULL || estimates == NULL || timestamp == NULL) {
@@ -383,13 +380,11 @@ esp_err_t odrive_get_encoder_estimates(odrive_context_t *context, odrive_encoder
         }
     }
 
-    // TODO: Memcopy here?
     memcpy(estimates, &stamped_payload.payload.encoder_estimates, sizeof(odrive_encoder_estimates_t));
     memcpy(timestamp, &stamped_payload.wall_time, sizeof(wallclock_timestamp_t));
     return ESP_OK;
 }
 
-// TODO: This should probably be moved?
 static uint32_t odrive_get_setpoint_command(ControlMode control_mode) {
     switch (control_mode) {
     case CONTROL_MODE_VELOCITY_CONTROL:
@@ -443,7 +438,6 @@ static esp_err_t odrive_send_setpoint(odrive_context_t *context, setpoint_payloa
     return can_send_data(msg_ig, payload, len, pdMS_TO_TICKS(ODRIVE_CAN_MAX_TRANSMIT_QUEUE_TIMEOUT_MS));
 }
 
-// TODO: Not sure how to best structure the interface for this
 esp_err_t odrive_set_velocity(odrive_context_t *context, float velocity, float torque_feed_forward) {
     if (context == NULL) {
         ESP_LOGE(ODRIVE_LOGGER_TAG, "Context pointer is NULL");

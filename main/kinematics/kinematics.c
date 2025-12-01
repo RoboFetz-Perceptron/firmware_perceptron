@@ -9,9 +9,8 @@
 static robot_parameters_t local_params_mm = {0};
 static float last_steer = 0.0f;
 
-esp_err_t forward_kinematics(
-    float in_delta_pos_l, float in_delta_pos_r, float in_vel_l, float in_vel_r, float *out_pos_x, float *out_pos_y, float *out_qx, float *out_qy, float *out_qz, float *out_qw, float *out_vel_x, float *out_omega_z) {
-    if (!out_pos_x || !out_pos_y || !out_qx || !out_qy || !out_qz || !out_qw || !out_vel_x || !out_omega_z) {
+esp_err_t forward_kinematics(const forward_kinematics_input_t *input, forward_kinematics_output_t *output) {
+    if (!input || !output) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -23,14 +22,13 @@ esp_err_t forward_kinematics(
 
     // 2) Convert all relevant dims to meters:
     float wheel_radius_m = MM_TO_M(local_params_mm.wheel_radius);
-    float track_width_m = MM_TO_M(local_params_mm.track_width); // rear‐axle b
     float wheel_base_m = MM_TO_M(local_params_mm.wheel_base);   // L
 
     // 3) Compute linear rear‐wheel displacements:
     //    delta_s_l = in_delta_pos_l * r
     //    delta_s_r = in_delta_pos_r * r
-    float delta_pos_l_m = in_delta_pos_l * wheel_radius_m;
-    float delta_pos_r_m = in_delta_pos_r * wheel_radius_m;
+    float delta_pos_l_m = input->delta_pos_l * wheel_radius_m;
+    float delta_pos_r_m = input->delta_pos_r * wheel_radius_m;
     // Midpoint rear travel:
     float delta_s = 0.5f * (delta_pos_l_m + delta_pos_r_m);
 
@@ -47,21 +45,21 @@ esp_err_t forward_kinematics(
 
     // 5) Unpack previous yaw from the quaternion:
     float roll, pitch, yaw;
-    math_quaternion_to_euler(*out_qx, *out_qy, *out_qz, *out_qw, &roll, &pitch, &yaw);
+    math_quaternion_to_euler(output->qx, output->qy, output->qz, output->qw, &roll, &pitch, &yaw);
 
     // 6) Midpoint heading for XY integration:
     float mid_yaw = yaw + 0.5f * delta_theta;
-    *out_pos_x += delta_s * cosf(mid_yaw);
-    *out_pos_y += delta_s * sinf(mid_yaw);
+    output->pos_x += delta_s * cosf(mid_yaw);
+    output->pos_y += delta_s * sinf(mid_yaw);
 
     // 7) Compute new yaw and pack back into quaternion:
     float new_yaw = math_normalize_angle(yaw + delta_theta);
-    math_euler_to_quaternion(0.0f, 0.0f, new_yaw, out_qx, out_qy, out_qz, out_qw);
+    math_euler_to_quaternion(0.0f, 0.0f, new_yaw, &output->qx, &output->qy, &output->qz, &output->qw);
 
     // 8) Body‐frame velocities:
     //    v_l = in_vel_l * r, v_r = in_vel_r * r
-    float v_l = in_vel_l * wheel_radius_m;
-    float v_r = in_vel_r * wheel_radius_m;
+    float v_l = input->vel_l * wheel_radius_m;
+    float v_r = input->vel_r * wheel_radius_m;
     //    v_CB = (v_l + v_r)/2:
     float v_CB = 0.5f * (v_l + v_r);
     //    omega_chassis = v_CB * tan(d) / L
@@ -72,14 +70,14 @@ esp_err_t forward_kinematics(
         omega_chassis = v_CB * (tan_delta / wheel_base_m);
     }
 
-    *out_vel_x = v_CB;
-    *out_omega_z = omega_chassis;
+    output->vel_x = v_CB;
+    output->omega_z = omega_chassis;
 
     return ESP_OK;
 }
 
-esp_err_t inverse_kinematics(float in_vel_x, float in_omega_z, float *out_vel_r, float *out_vel_l, float *out_steer) {
-    if (!out_vel_r || !out_vel_l || !out_steer) {
+esp_err_t inverse_kinematics(const inverse_kinematics_input_t *input, inverse_kinematics_output_t *output) {
+    if (!input || !output) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -93,17 +91,17 @@ esp_err_t inverse_kinematics(float in_vel_x, float in_omega_z, float *out_vel_r,
 
     // 2) Compute d = atan(L * omega / v):
     float d;
-    if (fabsf(in_vel_x) < 1e-6f) {
+    if (fabsf(input->vel_x) < 1e-6f) {
         // Allow steering even when the vehicle is stationary by mapping the
         // desired yaw rate directly to a steering angle. For small yaw rates
         // this approximates d ~ L * omega.
-        d = atanf(wheel_base_m * in_omega_z);
-        *out_vel_l = 0.0f;
-        *out_vel_r = 0.0f;
+        d = atanf(wheel_base_m * input->omega_z);
+        output->vel_l = 0.0f;
+        output->vel_r = 0.0f;
     } else {
-        d = atanf((wheel_base_m * in_omega_z) / in_vel_x);
+        d = atanf((wheel_base_m * input->omega_z) / input->vel_x);
     }
-    *out_steer = d;
+    output->steer = d;
     last_steer = d;
 
     // 3) Compute turning radius R = L / tan(d):
@@ -120,19 +118,19 @@ esp_err_t inverse_kinematics(float in_vel_x, float in_omega_z, float *out_vel_r,
     //    v_l = in_vel_x * (1 − b/(2 R_CB))
     //    v_r = in_vel_x * (1 + b/(2 R_CB))
     float v_l_lin, v_r_lin;
-    if (fabsf(in_omega_z) < 1e-6f || fabsf(tan_delta) < 1e-6f) {
+    if (fabsf(input->omega_z) < 1e-6f || fabsf(tan_delta) < 1e-6f) {
         // Straight line:
-        v_l_lin = in_vel_x;
-        v_r_lin = in_vel_x;
+        v_l_lin = input->vel_x;
+        v_r_lin = input->vel_x;
     } else {
         float ratio = (track_width_m / (2.0f * R_CB));
-        v_l_lin = in_vel_x * (1.0f - ratio);
-        v_r_lin = in_vel_x * (1.0f + ratio);
+        v_l_lin = input->vel_x * (1.0f - ratio);
+        v_r_lin = input->vel_x * (1.0f + ratio);
     }
 
     // 5) Convert to wheel angular speeds [rad/s]:
-    *out_vel_l = v_l_lin / wheel_radius_m;
-    *out_vel_r = v_r_lin / wheel_radius_m;
+    output->vel_l = v_l_lin / wheel_radius_m;
+    output->vel_r = v_r_lin / wheel_radius_m;
 
     return ESP_OK;
 }

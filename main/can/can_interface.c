@@ -6,7 +6,7 @@
 #include <esp_log.h>
 #include <string.h>
 
-static volatile bool s_can_running = false; // TODO: Replace with more detailed state management and bitmasks (or event groups)
+static volatile bool s_can_running = false;
 static volatile bool s_can_initialized = false;
 
 esp_err_t can_module_init(EventGroupHandle_t error_handle, EventBits_t error_bit) {
@@ -120,7 +120,6 @@ esp_err_t can_send_data(uint32_t msg_id, const void *data, size_t data_length, T
     }
 
     twai_message_t tx_msg = {
-        // TODO: This is the only twai dependency in this file, we should probably define our own struct in the driver
         .extd = 0,
         .rtr = 0,
         .ss = 0,

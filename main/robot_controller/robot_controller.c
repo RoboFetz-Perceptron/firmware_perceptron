@@ -78,31 +78,51 @@ static void base_control_task(void *pv) {
             break;
         }
 
-        float vel_x, omega_z;
-
         float delta_pos_ml = estimates_ml.pos_estimate - prev_pos_ml;
         float delta_pos_mr = estimates_mr.pos_estimate - prev_pos_mr;
 
         prev_pos_ml = estimates_ml.pos_estimate;
         prev_pos_mr = estimates_mr.pos_estimate;
 
-        // OK... that method signature is abit crazy.
-        if (forward_kinematics(delta_pos_ml, delta_pos_mr, estimates_ml.vel_estimate, estimates_mr.vel_estimate, &pos_x, &pos_y, &qx, &qy, &qz, &qw, &vel_x, &omega_z) != ESP_OK) {
+        forward_kinematics_input_t fk_input = {
+            .delta_pos_l = delta_pos_ml,
+            .delta_pos_r = delta_pos_mr,
+            .vel_l = estimates_ml.vel_estimate,
+            .vel_r = estimates_mr.vel_estimate};
+
+        forward_kinematics_output_t fk_output = {
+            .pos_x = pos_x,
+            .pos_y = pos_y,
+            .qx = qx,
+            .qy = qy,
+            .qz = qz,
+            .qw = qw,
+            .vel_x = 0.0f,
+            .omega_z = 0.0f};
+
+        if (forward_kinematics(&fk_input, &fk_output) != ESP_OK) {
             ESP_LOGE(ROBOT_CONTROLLER_LOGGER_TAG, "Failed to calculate forward kinematics");
             break;
         }
 
+        pos_x = fk_output.pos_x;
+        pos_y = fk_output.pos_y;
+        qx = fk_output.qx;
+        qy = fk_output.qy;
+        qz = fk_output.qz;
+        qw = fk_output.qw;
+
         //! We use the timestamp of the right encoder for the odometry message
         odom_msg.header.stamp.sec = timestamp_mr.tv_sec;
         odom_msg.header.stamp.nanosec = US_TO_NS(timestamp_mr.tv_usec);
-        odom_msg.pose.pose.position.x = pos_x;
-        odom_msg.pose.pose.position.y = pos_y;
-        odom_msg.pose.pose.orientation.x = qx;
-        odom_msg.pose.pose.orientation.y = qy;
-        odom_msg.pose.pose.orientation.z = qz;
-        odom_msg.pose.pose.orientation.w = qw;
-        odom_msg.twist.twist.linear.x = vel_x;
-        odom_msg.twist.twist.angular.z = omega_z;
+        odom_msg.pose.pose.position.x = fk_output.pos_x;
+        odom_msg.pose.pose.position.y = fk_output.pos_y;
+        odom_msg.pose.pose.orientation.x = fk_output.qx;
+        odom_msg.pose.pose.orientation.y = fk_output.qy;
+        odom_msg.pose.pose.orientation.z = fk_output.qz;
+        odom_msg.pose.pose.orientation.w = fk_output.qw;
+        odom_msg.twist.twist.linear.x = fk_output.vel_x;
+        odom_msg.twist.twist.angular.z = fk_output.omega_z;
 
         if (mros_update_odometry(&odom_msg) != ESP_OK) { // Mros will publish it once the internal timer is triggered
             ESP_LOGE(ROBOT_CONTROLLER_LOGGER_TAG, "Failed to update odometry");
@@ -126,22 +146,27 @@ static void base_control_task(void *pv) {
 void on_cmd_vel_callback(const geometry_msgs__msg__TwistStamped *msg, void *context) {
     ESP_UNUSED(context);
 
-    float vel_ml = 0.0f, torque_ff_ml = 0.0f;
-    float vel_mr = 0.0f, torque_ff_mr = 0.0f;
-    float steer_angle;
+    float torque_ff_ml = 0.0f;
+    float torque_ff_mr = 0.0f;
 
-    if (inverse_kinematics(msg->twist.linear.x, msg->twist.angular.z, &vel_mr, &vel_ml, &steer_angle) != ESP_OK) {
+    inverse_kinematics_input_t ik_input = {
+        .vel_x = msg->twist.linear.x,
+        .omega_z = msg->twist.angular.z};
+
+    inverse_kinematics_output_t ik_output;
+
+    if (inverse_kinematics(&ik_input, &ik_output) != ESP_OK) {
         ESP_LOGE(ROBOT_CONTROLLER_LOGGER_TAG, "Failed to calculate inverse kinematics");
         return;
     }
 
-    // ESP_LOGD(ROBOT_CONTROLLER_LOGGER_TAG, "Calculated velocities: ml: %f rad/s = %f rev/s, mr: %f rad/s = %f rev/s", vel_ml, RAD_TO_REV(vel_ml), vel_mr, RAD_TO_REV(vel_mr));
+    // ESP_LOGD(ROBOT_CONTROLLER_LOGGER_TAG, "Calculated velocities: ml: %f rad/s = %f rev/s, mr: %f rad/s = %f rev/s", ik_output.vel_l, RAD_TO_REV(ik_output.vel_l), ik_output.vel_r, RAD_TO_REV(ik_output.vel_r));
 
-    if (odrive_set_velocity(s_odrive_ml_context, RAD_TO_REV(vel_ml), torque_ff_ml) != ESP_OK) {
+    if (odrive_set_velocity(s_odrive_ml_context, RAD_TO_REV(ik_output.vel_l), torque_ff_ml) != ESP_OK) {
         ESP_LOGE(ROBOT_CONTROLLER_LOGGER_TAG, "Failed to set velocity for ODrive Node ID %d", s_odrive_ml_context->node_id);
         return;
     }
-    if (odrive_set_velocity(s_odrive_mr_context, RAD_TO_REV(vel_mr), torque_ff_mr) != ESP_OK) {
+    if (odrive_set_velocity(s_odrive_mr_context, RAD_TO_REV(ik_output.vel_r), torque_ff_mr) != ESP_OK) {
         ESP_LOGE(ROBOT_CONTROLLER_LOGGER_TAG, "Failed to set velocity for ODrive Node ID %d", s_odrive_mr_context->node_id);
         return;
     }
@@ -161,12 +186,12 @@ void on_cmd_vel_callback(const geometry_msgs__msg__TwistStamped *msg, void *cont
 
 #endif // JITTER_DEBUG
 
-    if (servo_set_angle(s_servo_context, RAD_TO_DEG(steer_angle)) != ESP_OK) {
+    if (servo_set_angle(s_servo_context, RAD_TO_DEG(ik_output.steer)) != ESP_OK) {
         ESP_LOGE(ROBOT_CONTROLLER_LOGGER_TAG, "Failed to set steering angle");
         return;
     }
 
-    // ESP_LOGI(ROBOT_CONTROLLER_LOGGER_TAG, "Set velocities: ml: %f rad/s = %f rev/s, mr: %f rad/s = %f rev/s, steer angle: %f deg", vel_ml, RAD_TO_REV(vel_ml), vel_mr, RAD_TO_REV(vel_mr), RAD_TO_DEG(steer_angle));
+    // ESP_LOGI(ROBOT_CONTROLLER_LOGGER_TAG, "Set velocities: ml: %f rad/s = %f rev/s, mr: %f rad/s = %f rev/s, steer angle: %f deg", ik_output.vel_l, RAD_TO_REV(ik_output.vel_l), ik_output.vel_r, RAD_TO_REV(ik_output.vel_r), RAD_TO_DEG(ik_output.steer));
 }
 
 esp_err_t robot_controller_init(odrive_context_t *odrive_ml_context, odrive_context_t *odrive_mr_context, servo_t *servo_context, EventGroupHandle_t error_handle, EventBits_t error_bit) {

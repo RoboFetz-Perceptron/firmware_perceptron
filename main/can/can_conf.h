@@ -3,40 +3,14 @@
 
 #include <sdkconfig.h>
 
-// Can dispatcher configuration
-
-#ifdef CAN_LOGGER_TAG
-#define CAN_DISPATCHER_TAG CAN_LOGGER_TAG "_DISPATCHER"
-#else
+// CAN dispatcher configuration
 #define CAN_DISPATCHER_TAG "CAN_DISPATCHER"
-#endif
-
-#ifdef CONFIG_CAN_DISPATCHER_MAX_CALLBACKS
-#define MAX_CBS CONFIG_CAN_DISPATCHER_MAX_CALLBACKS
-#else
 #define MAX_CBS 16
-#endif
-
-#ifdef CONFIG_CAN_DISPATCHER_TASK_NAME
-#define TASK_NAME CONFIG_CAN_DISPATCHER_TASK_NAME
-#else
 #define TASK_NAME "can_dispatcher_task"
-#endif
-
-#ifdef CONFIG_CAN_DISPATCHER_TASK_STACK_SIZE
-#define TASK_STACK_SZ CONFIG_CAN_DISPATCHER_TASK_STACK_SIZE
-#else
 #define TASK_STACK_SZ 4096
-#endif
-
-#ifdef CONFIG_CAN_DISPATCHER_TASK_PRIORITY
-#define TASK_PRIO CONFIG_CAN_DISPATCHER_TASK_PRIORITY
-#else
 #define TASK_PRIO 6
-#endif
 
-// Can driver configuration
-
+// CAN driver configuration
 #ifdef CONFIG_CAN_TX_GPIO
 #define CAN_TX_GPIO CONFIG_CAN_TX_GPIO
 #else
@@ -49,28 +23,9 @@
 #define CAN_RX_GPIO GPIO_NUM_22
 #endif
 
-#ifdef CONFIG_CAN_TX_QUEUE_LEN
-#define CAN_TX_QUEUE_LEN CONFIG_CAN_TX_QUEUE_LEN
-#else
 #define CAN_TX_QUEUE_LEN 10
-#endif
-
-#ifdef CONFIG_CAN_RX_QUEUE_LEN
-#define CAN_RX_QUEUE_LEN CONFIG_CAN_RX_QUEUE_LEN
-#else
 #define CAN_RX_QUEUE_LEN 10
-#endif
-
-#ifdef CONFIG_CAN_LOGGER_TAG
-#define CAN_LOGGER_TAG CONFIG_CAN_LOGGER_TAG
-#else
 #define CAN_LOGGER_TAG "CAN_DRV"
-#endif
-
-#ifdef CONFIG_CAN_MAX_RECEIVE_TIMEOUT_MS
-#define CAN_MAX_RECEIVE_TIMEOUT_MS CONFIG_CAN_MAX_RECEIVE_TIMEOUT_MS
-#else
-#define CAN_MAX_RECEIVE_TIMEOUT_MS 5000
-#endif
+#define CAN_MAX_RECEIVE_TIMEOUT_MS 1000
 
 #endif // CAN_CONF_H

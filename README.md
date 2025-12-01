@@ -76,9 +76,8 @@ reset init
 resume
 esp sysview start file://traces/mros_trace_01.SVDat 0 -1 -1 0 0
 ```
-  
-## TODO
-- Resolve TODOs in the code
+
+## Future Enhancements
 - Add cleaner parameter handling
 - Test odometry correctness and accuracy
 - Add torque control

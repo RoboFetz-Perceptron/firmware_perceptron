@@ -403,10 +403,19 @@ esp_err_t mros_module_deinit(TickType_t wait_ticks) {
     }
     rclc_executor_fini(&s_executor);
     rclc_parameter_server_fini(&s_param_server, &s_node);
-    rcl_publisher_fini(&s_odom_publisher, &s_node);
-    rcl_subscription_fini(&s_cmd_vel_subscriber, &s_node);
-    rcl_timer_fini(&s_odom_timer);
-    rcl_node_fini(&s_node);
+
+    if (rcl_publisher_fini(&s_odom_publisher, &s_node) != RCL_RET_OK) {
+        ESP_LOGW(MROS_LOGGER_TAG, "Failed to finalize odom publisher");
+    }
+    if (rcl_subscription_fini(&s_cmd_vel_subscriber, &s_node) != RCL_RET_OK) {
+        ESP_LOGW(MROS_LOGGER_TAG, "Failed to finalize cmd_vel subscriber");
+    }
+    if (rcl_timer_fini(&s_odom_timer) != RCL_RET_OK) {
+        ESP_LOGW(MROS_LOGGER_TAG, "Failed to finalize odom timer");
+    }
+    if (rcl_node_fini(&s_node) != RCL_RET_OK) {
+        ESP_LOGW(MROS_LOGGER_TAG, "Failed to finalize node");
+    }
     rclc_support_fini(&s_support);
 
     if (s_mros_evt_group) {

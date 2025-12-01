@@ -18,7 +18,7 @@ typedef void (*can_message_callback_t)(uint32_t msg_id, const uint8_t *data, siz
  * @param error_bit Event bit to set on error
  * @return esp_err_t ESP_OK on success, ESP_FAIL on failure
  */
-esp_err_t can_module_init(EventGroupHandle_t error_handle, EventBits_t error_bit); // TODO: Also provide interface for "not default"
+esp_err_t can_module_init(EventGroupHandle_t error_handle, EventBits_t error_bit);
 
 /**
  * @brief Check if the CAN module is running

@@ -70,7 +70,7 @@ esp_err_t servo_init(servo_t *s, int gpio_num, int8_t zero_offset_deg) {
     // 6) Store calibrated zero offset
     if (zero_offset_deg < SERVO_PHYS_MIN_DEGREE)
         zero_offset_deg = SERVO_PHYS_MIN_DEGREE;
-    if (zero_offset_deg > SERVO_PHYS_MAX_DEGREE)
+    if ((int)zero_offset_deg > SERVO_PHYS_MAX_DEGREE)
         zero_offset_deg = SERVO_PHYS_MAX_DEGREE;
     s->zero_offset_deg = zero_offset_deg;
 
