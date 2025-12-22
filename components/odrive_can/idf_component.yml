@@ -1,0 +1,4 @@
+version: "1.0.0"
+description: "ODrive motor controller CAN protocol implementation"
+dependencies:
+  idf: ">=5.0"

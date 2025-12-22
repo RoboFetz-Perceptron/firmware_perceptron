@@ -1,22 +1,21 @@
 set(SOURCES
-    # playground/misc/servo_calibration.c
-    main.c
-    can/can_driver.c
-    can/can_dispatcher.c
-    can/can_rtr.c
-    can/can_interface.c
-    odrive/odrive.c
-    mros/mros.c
-    mros/mros_transport.c
-    mros/mros_param.c
-    kinematics/kinematics.c
-    utils/indicator_led.c
-    utils/jtag_debug.c
-    utils/math_utils.c
-    servo/servo.c
-    robot_controller/robot_controller.c
+    src/main.c
+    src/robot_controller/robot_controller.c
+    src/app_utils/indicator_led.c
+    src/app_utils/jtag_debug.c
 )
 
-idf_component_register(SRCS ${SOURCES}
-    INCLUDE_DIRS "."
+idf_component_register(
+    SRCS ${SOURCES}
+    INCLUDE_DIRS "include"
+    REQUIRES
+        common_utils
+        esp32_servo
+        esp32_can
+        odrive_can
+        ackermann_kinematics
+        mros
+    PRIV_REQUIRES
+        micro_ros_espidf_component
+        espressif__led_strip
 )

@@ -1,0 +1,4 @@
+version: "1.0.0"
+description: "micro-ROS integration for robot (ROS2 bridge, parameters, odometry)"
+dependencies:
+  idf: ">=5.0"

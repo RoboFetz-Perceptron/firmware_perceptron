@@ -1,0 +1,17 @@
+idf_component_register(
+    SRCS
+        "src/mros.c"
+        "src/mros_transport.c"
+        "src/mros_param.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        common_utils
+        driver
+    PRIV_REQUIRES
+        micro_ros_espidf_component
+        nvs_flash
+        esp_netif
+        esp_wifi
+        esp_timer
+)

@@ -1,0 +1,4 @@
+version: "1.0.0"
+description: "Generic PWM servo motor control for ESP32 using MCPWM"
+dependencies:
+  idf: ">=5.0"

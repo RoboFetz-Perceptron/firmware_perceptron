@@ -1,0 +1,4 @@
+version: "1.0.0"
+description: "Generic CAN bus interface for ESP32 with dispatcher and RTR support"
+dependencies:
+  idf: ">=5.0"
