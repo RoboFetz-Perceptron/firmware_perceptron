@@ -1,132 +1,105 @@
-menu "Application-specific settings"
+menu "micro-ROS BLE Transport"
 
-    menu "CAN settings"
+    config MICROROS_BLE_DEVICE_NAME
+        string "BLE Device Name"
+        default "microROS_BLE"
+        help
+            The Bluetooth device name advertised by the ESP32.
 
-        config CAN_TX_GPIO
-            int "CAN TX GPIO"
-            range 0 33
-            default 23
-
-        config CAN_RX_GPIO
-            int "CAN RX GPIO"
-            range 0 33
-            default 22
-
-        config CAN_RTR_TIMEOUT_MS
-            int "RTR timeout (ms)"
-            default 50
-            help
-                Timeout for Remote Transmission Request (RTR) responses.
-
-    endmenu # CAN settings
-
-    menu "ODrive settings"
-
-        config ODRIVE_NODE_ID_M0
-            int "Node-ID for Motor 0"
+    menu "LED Parameters (defaults)"
+        config MICROROS_LED_DEFAULT_BRIGHTNESS
+            int "Default LED Brightness"
+            default 64
             range 0 255
+            help
+                Default LED brightness (0-255).
+                Can be changed at runtime via ROS2 parameter.
+
+        config MICROROS_LED_DEFAULT_RED
+            int "Default LED Red"
             default 0
-
-        config ODRIVE_NODE_ID_M1
-            int "Node-ID for Motor 1"
             range 0 255
-            default 1
-
-        config ODRIVE_MAX_CALIBRATION_TIME_S
-            int "Maximum calibration time (s)"
-            default 20
             help
-                Maximum time to wait for ODrive motor calibration to complete.
+                Default red channel value (0-255).
 
-    endmenu # ODrive settings
-    
-    
-    menu "micro-ROS application"
-
-        config MROS_NODE_NAME
-            string "micro-ROS node name"
-            default "car_node"
-
-        config MROS_NODE_NAMESPACE
-            string "micro-ROS node namespace"
-            default ""
+        config MICROROS_LED_DEFAULT_GREEN
+            int "Default LED Green"
+            default 0
+            range 0 255
             help
-                Leave empty for no namespace.
+                Default green channel value (0-255).
 
-        config MROS_CMD_VEL_TOPIC
-            string "micro-ROS cmd_vel topic"
-            default "cmd_vel"
-
-        config MROS_ODOMETRY_TOPIC
-            string "micro-ROS odometry topic"
-            default "odom"
-
-        config MROS_ODOMETRY_FRAME_ID
-            string "micro-ROS odometry frame ID"
-            default "odom"
-
-        config MROS_BASE_FRAME_ID
-            string "micro-ROS base frame ID"
-            default "base_link"
-
-        config MROS_ODOM_PUBLISHER_PERIOD_MS
-            int "Odometry publisher period (ms)"
-            default 100
+        config MICROROS_LED_DEFAULT_BLUE
+            int "Default LED Blue"
+            default 64
+            range 0 255
             help
-                Rate at which odometry messages are published.
+                Default blue channel value (0-255).
+    endmenu
 
-    endmenu # micro-ROS application
-    
-    
-    menu "Robot kinematics"
+    config MICROROS_BLE_RX_QUEUE_SIZE
+        int "RX Queue Size"
+        default 16
+        range 4 64
+        help
+            Number of packets that can be queued for reception.
+            Increase if you experience packet drops.
 
-        config ROBOT_WHEEL_RADIUS_MM
-            int "Wheel radius (mm)"
-            default 32
-            range 1 1000
+    config MICROROS_BLE_RX_BUFFER_SIZE
+        int "RX Buffer Size (bytes)"
+        default 512
+        range 64 1024
+        help
+            Maximum size of a single received packet.
+            Should be at least as large as the negotiated MTU.
 
-        config ROBOT_TRACK_WIDTH_MM
-            int "Track width (mm)"
-            default 185
-            range 1 1000
+    config MICROROS_BLE_ADV_INTERVAL_MIN
+        hex "Advertising Interval Min (units of 0.625ms)"
+        default 0x20
+        help
+            Minimum advertising interval.
+            0x20 = 20ms, 0x40 = 40ms, 0x100 = 160ms
 
-        config ROBOT_WHEEL_BASE_MM
-            int "Wheelbase (mm)"
-            default 255
-            range 1 1000
+    config MICROROS_BLE_ADV_INTERVAL_MAX
+        hex "Advertising Interval Max (units of 0.625ms)"
+        default 0x40
+        help
+            Maximum advertising interval.
+            Should be >= min interval.
 
-    endmenu # Robot kinematics
+    config MICROROS_BLE_TX_CHUNK_DELAY_MS
+        int "TX Inter-chunk Delay (ms)"
+        default 2
+        range 0 20
+        help
+            Delay between BLE notification chunks.
+            Helps avoid buffer overflow on slow connections.
 
-
-    menu "Servo settings"
-
-        config SERVO_GPIO
-            int "Servo GPIO pin"
-            range 0 33
-            default 5
+    menu "micro-ROS Topic Configuration"
+        config MICROROS_STATUS_PUBLISH_PERIOD_MS
+            int "Status publish period (ms)"
+            default 1000
+            range 100 10000
             help
-                GPIO pin connected to the servo control signal.
+                Period for publishing robot status (best effort).
 
-        config SERVO_CALIBRATED_MIDDLE_OFFSET
-            int "Servo calibrated middle offset"
-            range -500 500
-            default 46
+        config MICROROS_LED_STATE_TOPIC
+            string "LED State Topic"
+            default "/led_state"
             help
-                Calibration offset for the servo middle position in microseconds.
-                Adjust this value to align the servo to the true center position.
+                Topic name for LED state publisher.
 
-    endmenu # Servo settings
+        config MICROROS_LED_CONTROL_TOPIC
+            string "LED Control Topic"
+            default "/led_control"
+            help
+                Topic name for LED control subscription.
 
+        config MICROROS_ROBOT_STATUS_TOPIC
+            string "Robot Status Topic"
+            default "/robot_status"
+            help
+                Topic name for robot status publisher (best effort).
+    endmenu
 
-    config ERROR_LED_GPIO
-        int "Error-LED GPIO"
-        range 0 33
-        default 8
-
-    config JTAG_BUFF_SIZE
-        int "JTAG buffer size"
-        range 0 1024
-        default 1024
-    
-endmenu # Application-specific settings
-    
+endmenu

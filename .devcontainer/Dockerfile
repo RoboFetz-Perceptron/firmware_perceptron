@@ -8,7 +8,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # Update and install packages, configure locale and timezone, and update bashrc
 RUN apt-get update -q && \
-    apt-get install -yq sudo gosu lsb-release udev python3-pip locales git clang-format && \
+    apt-get install -yq sudo gosu lsb-release udev python3-pip locales git clang-format \
+    dbus bluez bluetooth libbluetooth-dev && \
     rm -rf /var/lib/apt/lists/* && \
     ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
     echo $TZ > /etc/timezone && \

@@ -1,4 +1,0 @@
-version: "1.0.0"
-description: "Common utilities: math, timing, and GPIO helpers"
-dependencies:
-  idf: ">=5.0"

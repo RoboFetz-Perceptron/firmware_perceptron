@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp:*)",
+      "Bash(find:*)",
+      "Bash(idf.py build:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

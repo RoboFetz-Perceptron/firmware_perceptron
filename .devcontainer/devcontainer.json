@@ -8,6 +8,8 @@
 		"--privileged",
 		"--volume=/dev:/dev",
 		"--volume=/etc/timezone:/etc/timezone:ro",
+		"--volume=/var/run/dbus:/var/run/dbus:ro",
+		"--volume=/run/dbus:/run/dbus:ro",
 		"--network=host"
 	],
 	"remoteUser": "root",

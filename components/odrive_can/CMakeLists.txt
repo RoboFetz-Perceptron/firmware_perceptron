@@ -1,9 +1,0 @@
-idf_component_register(
-    SRCS
-        "src/odrive.c"
-    INCLUDE_DIRS
-        "include"
-    REQUIRES
-        "esp32_can"
-        "common_utils"
-)

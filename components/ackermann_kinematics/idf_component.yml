@@ -1,4 +1,0 @@
-version: "1.0.0"
-description: "Ackermann steering vehicle kinematics calculations"
-dependencies:
-  idf: ">=5.0"
