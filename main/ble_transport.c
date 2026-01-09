@@ -1,48 +1,3 @@
-/**
- * @file ble_transport.c
- * @brief BLE Custom Transport for micro-ROS using ESP-IDF NimBLE Stack
- *
- * ============================================================================
- * OVERVIEW
- * ============================================================================
- * This file implements a Bluetooth Low Energy (BLE) transport layer that allows
- * micro-ROS on an ESP32 to communicate with a micro-ROS Agent running on a PC.
- *
- * The communication uses the Nordic UART Service (NUS), a widely-supported
- * BLE profile that emulates a serial port over BLE:
- *   - RX Characteristic: Agent writes data TO the ESP32 (we receive)
- *   - TX Characteristic: ESP32 sends data TO the Agent via notifications
- *
- * ============================================================================
- * DATA FLOW DIAGRAM
- * ============================================================================
- *
- *   +----------------+          BLE           +------------------+
- *   |  micro-ROS     |  <---- NUS Service --> |  micro-ROS Agent |
- *   |  (ESP32)       |                        |  (PC/Linux)      |
- *   +----------------+                        +------------------+
- *
- *   RECEIVE (Agent → ESP32):
- *     Agent write → BLE stack → gatt_cb() → StreamBuffer → ble_transport_read()
- *
- *   SEND (ESP32 → Agent):
- *     ble_transport_write() → ble_gatts_notify_custom() → BLE stack → Agent
- *
- * ============================================================================
- * micro-ROS CUSTOM TRANSPORT API
- * ============================================================================
- * micro-ROS requires 4 callback functions for custom transports:
- *   1. open()  - Initialize transport (no-op here, BLE init done separately)
- *   2. close() - Cleanup transport (no-op, keep BLE running)
- *   3. write() - Send data to agent
- *   4. read()  - Receive data from agent
- *
- * Register via: rmw_uros_set_custom_transport(true, &ctx, open, close, write, read)
- *
- * The 'framing=true' parameter tells micro-ROS to use HDLC framing (0x7E delimiters)
- * because BLE is stream-oriented and needs explicit message boundaries.
- */
-
 #include "include/ble_transport.h"
 
 #include <esp_log.h>
@@ -51,7 +6,6 @@
 #include <nvs_flash.h>
 #include <string.h>
 
-/* NimBLE stack headers */
 #include "host/ble_hs.h"
 #include "host/util/util.h"
 #include "nimble/nimble_port.h"

@@ -75,31 +75,18 @@ menu "micro-ROS BLE Transport"
             Delay between BLE notification chunks.
             Helps avoid buffer overflow on slow connections.
 
-    menu "micro-ROS Topic Configuration"
-        config MICROROS_STATUS_PUBLISH_PERIOD_MS
-            int "Status publish period (ms)"
-            default 1000
-            range 100 10000
+    menu "Benchmark Configuration"
+        config MICROROS_BENCHMARK_REQUEST_TOPIC
+            string "Benchmark Request Topic"
+            default "/benchmark/request"
             help
-                Period for publishing robot status (best effort).
+                Topic for receiving benchmark roundtrip requests from host.
 
-        config MICROROS_LED_STATE_TOPIC
-            string "LED State Topic"
-            default "/led_state"
+        config MICROROS_BENCHMARK_RESPONSE_TOPIC
+            string "Benchmark Response Topic"
+            default "/benchmark/response"
             help
-                Topic name for LED state publisher.
-
-        config MICROROS_LED_CONTROL_TOPIC
-            string "LED Control Topic"
-            default "/led_control"
-            help
-                Topic name for LED control subscription.
-
-        config MICROROS_ROBOT_STATUS_TOPIC
-            string "Robot Status Topic"
-            default "/robot_status"
-            help
-                Topic name for robot status publisher (best effort).
+                Topic for publishing benchmark roundtrip responses to host.
     endmenu
 
 endmenu

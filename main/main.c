@@ -1,3 +1,6 @@
+#include <string.h>
+#include <sys/time.h>
+
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
@@ -12,6 +15,8 @@
 #include <rclc_parameter/rclc_parameter.h>
 #include <rmw_microros/rmw_microros.h>
 
+#include <benchmark_msgs/msg/roundtrip.h>
+
 #include "include/ble_transport.h"
 
 #define TAG "MICROROS_LED"
@@ -19,6 +24,9 @@
 
 #define NODE_NAME "esp32c6_led"
 #define NODE_NAMESPACE "rc_car"
+
+#define BENCHMARK_REQUEST_TOPIC CONFIG_MICROROS_BENCHMARK_REQUEST_TOPIC
+#define BENCHMARK_RESPONSE_TOPIC CONFIG_MICROROS_BENCHMARK_RESPONSE_TOPIC
 
 #define PARAM_NAMESPACE "led_params"
 #define PARAM_BRIGHTNESS "led_bright"
@@ -32,8 +40,11 @@
 #define DEFAULT_BLUE 64
 
 #define SPIN_TIMEOUT_MS 100
+#define TIME_SYNC_TIMEOUT_MS 1000
+#define TIME_RESYNC_PERIOD_MS 30000
 
-#define EXECUTOR_HANDLES RCLC_EXECUTOR_PARAMETER_SERVER_HANDLES
+// Parameter server handles + 1 for benchmark subscription
+#define EXECUTOR_HANDLES (RCLC_EXECUTOR_PARAMETER_SERVER_HANDLES + 1)
 
 #define RCCHECK(fn)                                                                                                                                                                                                        \
     do {                                                                                                                                                                                                                   \
@@ -61,6 +72,8 @@ static led_params_t s_params = {
 };
 
 static led_strip_handle_t s_led = NULL;
+static bool s_time_synced = false;
+static int64_t s_last_sync_time = 0;
 static ble_transport_ctx_t s_ble_ctx;
 
 static rcl_allocator_t s_allocator;
@@ -68,6 +81,11 @@ static rclc_support_t s_support;
 static rcl_node_t s_node;
 static rclc_executor_t s_executor;
 static rclc_parameter_server_t s_param_server;
+
+// Benchmark roundtrip
+static rcl_subscription_t s_benchmark_sub;
+static rcl_publisher_t s_benchmark_pub;
+static benchmark_msgs__msg__Roundtrip s_benchmark_msg;
 
 static esp_err_t nvs_load_i32(const char *key, int32_t *value) {
     nvs_handle_t h;
@@ -158,6 +176,35 @@ static void led_set_blink(bool on) {
     led_strip_refresh(s_led);
 }
 
+static bool time_sync_with_agent(void) {
+    if (rmw_uros_sync_session(TIME_SYNC_TIMEOUT_MS) != RMW_RET_OK) {
+        ESP_LOGW(TAG, "Time sync session failed");
+        return false;
+    }
+
+    if (!rmw_uros_epoch_synchronized()) {
+        ESP_LOGW(TAG, "Epoch not synchronized");
+        return false;
+    }
+
+    int64_t epoch_nanos = rmw_uros_epoch_nanos();
+
+    struct timeval tv;
+    tv.tv_sec = epoch_nanos / 1000000000LL;
+    tv.tv_usec = (epoch_nanos % 1000000000LL) / 1000LL;
+
+    if (settimeofday(&tv, NULL) != 0) {
+        ESP_LOGE(TAG, "Failed to set system time");
+        return false;
+    }
+
+    s_time_synced = true;
+    s_last_sync_time = esp_timer_get_time();
+
+    ESP_LOGI(TAG, "Time synced: %lld.%06ld", (long long)tv.tv_sec, tv.tv_usec);
+    return true;
+}
+
 static bool on_param_changed(const Parameter *old_param, const Parameter *new_param, void *ctx) {
     (void)ctx;
 
@@ -212,6 +259,43 @@ static bool on_param_changed(const Parameter *old_param, const Parameter *new_pa
     return err == ESP_OK;
 }
 
+static void benchmark_callback(const void *msg_in) {
+    const benchmark_msgs__msg__Roundtrip *req = (const benchmark_msgs__msg__Roundtrip *)msg_in;
+
+    // Copy the incoming message
+    s_benchmark_msg.seq = req->seq;
+    s_benchmark_msg.stamp_host_send = req->stamp_host_send;
+
+    // Get synchronized time for firmware receive timestamp
+    int64_t time_ns = rmw_uros_epoch_nanos();
+    s_benchmark_msg.stamp_firmware_recv.sec = (int32_t)(time_ns / 1000000000LL);
+    s_benchmark_msg.stamp_firmware_recv.nanosec = (uint32_t)(time_ns % 1000000000LL);
+
+    // Copy payload if present
+    if (req->payload.size > 0 && req->payload.data != NULL) {
+        if (s_benchmark_msg.payload.capacity < req->payload.size) {
+            // Reallocate if needed
+            if (s_benchmark_msg.payload.data != NULL) {
+                s_allocator.deallocate(s_benchmark_msg.payload.data, s_allocator.state);
+            }
+            s_benchmark_msg.payload.data = s_allocator.allocate(req->payload.size, s_allocator.state);
+            s_benchmark_msg.payload.capacity = req->payload.size;
+        }
+        if (s_benchmark_msg.payload.data != NULL) {
+            memcpy(s_benchmark_msg.payload.data, req->payload.data, req->payload.size);
+            s_benchmark_msg.payload.size = req->payload.size;
+        }
+    } else {
+        s_benchmark_msg.payload.size = 0;
+    }
+
+    // Echo back immediately
+    rcl_ret_t rc = rcl_publish(&s_benchmark_pub, &s_benchmark_msg, NULL);
+    if (rc != RCL_RET_OK) {
+        ESP_LOGW(TAG, "Benchmark publish failed: %d", (int)rc);
+    }
+}
+
 static void microros_init(void) {
     ESP_LOGI(TAG, "=== micro-ROS Init Start ===");
 
@@ -242,8 +326,25 @@ static void microros_init(void) {
     RCCHECK(rclc_parameter_set_int(&s_param_server, PARAM_GREEN, s_params.green));
     RCCHECK(rclc_parameter_set_int(&s_param_server, PARAM_BLUE, s_params.blue));
 
+    // Initialize benchmark publisher (best effort for lower latency)
+    ESP_LOGI(TAG, "Initializing benchmark publisher...");
+    s_benchmark_pub = rcl_get_zero_initialized_publisher();
+    RCCHECK(rclc_publisher_init_best_effort(&s_benchmark_pub, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(benchmark_msgs, msg, Roundtrip), BENCHMARK_RESPONSE_TOPIC));
+
+    // Initialize benchmark subscriber (best effort for lower latency)
+    ESP_LOGI(TAG, "Initializing benchmark subscriber...");
+    s_benchmark_sub = rcl_get_zero_initialized_subscription();
+    RCCHECK(rclc_subscription_init_best_effort(&s_benchmark_sub, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(benchmark_msgs, msg, Roundtrip), BENCHMARK_REQUEST_TOPIC));
+
+    // Add subscription to executor
+    RCCHECK(rclc_executor_add_subscription(&s_executor, &s_benchmark_sub, &s_benchmark_msg, &benchmark_callback, ON_NEW_DATA));
+
+    // Initialize message memory
+    benchmark_msgs__msg__Roundtrip__init(&s_benchmark_msg);
+
     ESP_LOGI(TAG, "=== micro-ROS Init Complete ===");
     ESP_LOGI(TAG, "Node: /%s/%s", NODE_NAMESPACE, NODE_NAME);
+    ESP_LOGI(TAG, "Benchmark: %s -> %s", BENCHMARK_REQUEST_TOPIC, BENCHMARK_RESPONSE_TOPIC);
     ESP_LOGI(TAG, "Try: ros2 param list /%s/%s", NODE_NAMESPACE, NODE_NAME);
 }
 
@@ -269,15 +370,35 @@ static void microros_task(void *arg) {
     }
     ESP_LOGI(TAG, "Agent connected!");
 
+    vTaskDelay(pdMS_TO_TICKS(500));
     microros_init();
+
+    ESP_LOGI(TAG, "Synchronizing time...");
+    for (int i = 0; i < 3 && !s_time_synced; i++) {
+        if (time_sync_with_agent())
+            break;
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+    if (!s_time_synced) {
+        ESP_LOGW(TAG, "Time sync failed, using monotonic time");
+    }
 
     ESP_LOGI(TAG, "Entering main loop...");
     while (true) {
         if (!s_ble_ctx.connected) {
             ESP_LOGW(TAG, "BLE disconnected - waiting for reconnect...");
+            s_time_synced = false; // Invalidate time on disconnect
             while (!s_ble_ctx.connected)
                 vTaskDelay(pdMS_TO_TICKS(500));
             vTaskDelay(pdMS_TO_TICKS(500));
+            // Re-sync after reconnect
+            time_sync_with_agent();
+        }
+
+        // Periodic time re-sync
+        int64_t now = esp_timer_get_time();
+        if (s_time_synced && (now - s_last_sync_time) > (TIME_RESYNC_PERIOD_MS * 1000LL)) {
+            time_sync_with_agent();
         }
 
         rclc_executor_spin_some(&s_executor, RCL_MS_TO_NS(SPIN_TIMEOUT_MS));
