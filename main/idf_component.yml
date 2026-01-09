@@ -2,4 +2,5 @@ dependencies:
   micro_ros_espidf_component:
     # Using fork until https://github.com/micro-ROS/micro_ros_espidf_component/issues/288 is resolved
     git: https://github.com/Technologie-Hub-Wien-e-V/micro_ros_espidf_component.git
+    # git: https://github.com/micro-ROS/micro_ros_espidf_component.git
   espressif/led_strip: "^3.0.0"
