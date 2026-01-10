@@ -15,7 +15,10 @@
 #include <rclc_parameter/rclc_parameter.h>
 #include <rmw_microros/rmw_microros.h>
 
-#include <benchmark_msgs/msg/roundtrip.h>
+#include <benchmark_msgs/msg/benchmark_int32.h>
+#include <benchmark_msgs/msg/benchmark_minimal.h>
+#include <benchmark_msgs/msg/benchmark_odom.h>
+#include <benchmark_msgs/msg/benchmark_twist.h>
 
 #include "include/ble_transport.h"
 
@@ -25,8 +28,14 @@
 #define NODE_NAME "esp32c6_led"
 #define NODE_NAMESPACE "rc_car"
 
-#define BENCHMARK_REQUEST_TOPIC CONFIG_MICROROS_BENCHMARK_REQUEST_TOPIC
-#define BENCHMARK_RESPONSE_TOPIC CONFIG_MICROROS_BENCHMARK_RESPONSE_TOPIC
+#define BENCH_MINIMAL_REQ "benchmark/minimal/request"
+#define BENCH_MINIMAL_RES "benchmark/minimal/response"
+#define BENCH_INT32_REQ "benchmark/int32/request"
+#define BENCH_INT32_RES "benchmark/int32/response"
+#define BENCH_TWIST_REQ "benchmark/twist/request"
+#define BENCH_TWIST_RES "benchmark/twist/response"
+#define BENCH_ODOM_REQ "benchmark/odom/request"
+#define BENCH_ODOM_RES "benchmark/odom/response"
 
 #define PARAM_NAMESPACE "led_params"
 #define PARAM_BRIGHTNESS "led_bright"
@@ -43,8 +52,8 @@
 #define TIME_SYNC_TIMEOUT_MS 1000
 #define TIME_RESYNC_PERIOD_MS 30000
 
-// Parameter server handles + 1 for benchmark subscription
-#define EXECUTOR_HANDLES (RCLC_EXECUTOR_PARAMETER_SERVER_HANDLES + 1)
+// Parameter server handles + 4 benchmark subscriptions
+#define EXECUTOR_HANDLES (RCLC_EXECUTOR_PARAMETER_SERVER_HANDLES + 4)
 
 #define RCCHECK(fn)                                                                                                                                                                                                        \
     do {                                                                                                                                                                                                                   \
@@ -82,10 +91,22 @@ static rcl_node_t s_node;
 static rclc_executor_t s_executor;
 static rclc_parameter_server_t s_param_server;
 
-// Benchmark roundtrip
-static rcl_subscription_t s_benchmark_sub;
-static rcl_publisher_t s_benchmark_pub;
-static benchmark_msgs__msg__Roundtrip s_benchmark_msg;
+// Benchmark subscriptions and publishers
+static rcl_subscription_t s_sub_minimal;
+static rcl_publisher_t s_pub_minimal;
+static benchmark_msgs__msg__BenchmarkMinimal s_msg_minimal;
+
+static rcl_subscription_t s_sub_int32;
+static rcl_publisher_t s_pub_int32;
+static benchmark_msgs__msg__BenchmarkInt32 s_msg_int32;
+
+static rcl_subscription_t s_sub_twist;
+static rcl_publisher_t s_pub_twist;
+static benchmark_msgs__msg__BenchmarkTwist s_msg_twist;
+
+static rcl_subscription_t s_sub_odom;
+static rcl_publisher_t s_pub_odom;
+static benchmark_msgs__msg__BenchmarkOdom s_msg_odom;
 
 static esp_err_t nvs_load_i32(const char *key, int32_t *value) {
     nvs_handle_t h;
@@ -259,41 +280,46 @@ static bool on_param_changed(const Parameter *old_param, const Parameter *new_pa
     return err == ESP_OK;
 }
 
-static void benchmark_callback(const void *msg_in) {
-    const benchmark_msgs__msg__Roundtrip *req = (const benchmark_msgs__msg__Roundtrip *)msg_in;
-
-    // Copy the incoming message
-    s_benchmark_msg.seq = req->seq;
-    s_benchmark_msg.stamp_host_send = req->stamp_host_send;
-
-    // Get synchronized time for firmware receive timestamp
+// Helper to get current time and fill stamp_recv
+static void fill_recv_timestamp(builtin_interfaces__msg__Time *stamp) {
     int64_t time_ns = rmw_uros_epoch_nanos();
-    s_benchmark_msg.stamp_firmware_recv.sec = (int32_t)(time_ns / 1000000000LL);
-    s_benchmark_msg.stamp_firmware_recv.nanosec = (uint32_t)(time_ns % 1000000000LL);
+    stamp->sec = (int32_t)(time_ns / 1000000000LL);
+    stamp->nanosec = (uint32_t)(time_ns % 1000000000LL);
+}
 
-    // Copy payload if present
-    if (req->payload.size > 0 && req->payload.data != NULL) {
-        if (s_benchmark_msg.payload.capacity < req->payload.size) {
-            // Reallocate if needed
-            if (s_benchmark_msg.payload.data != NULL) {
-                s_allocator.deallocate(s_benchmark_msg.payload.data, s_allocator.state);
-            }
-            s_benchmark_msg.payload.data = s_allocator.allocate(req->payload.size, s_allocator.state);
-            s_benchmark_msg.payload.capacity = req->payload.size;
-        }
-        if (s_benchmark_msg.payload.data != NULL) {
-            memcpy(s_benchmark_msg.payload.data, req->payload.data, req->payload.size);
-            s_benchmark_msg.payload.size = req->payload.size;
-        }
-    } else {
-        s_benchmark_msg.payload.size = 0;
-    }
+static void cb_minimal(const void *msg_in) {
+    const benchmark_msgs__msg__BenchmarkMinimal *req = msg_in;
+    s_msg_minimal.seq = req->seq;
+    s_msg_minimal.stamp_send = req->stamp_send;
+    fill_recv_timestamp(&s_msg_minimal.stamp_recv);
+    rcl_publish(&s_pub_minimal, &s_msg_minimal, NULL);
+}
 
-    // Echo back immediately
-    rcl_ret_t rc = rcl_publish(&s_benchmark_pub, &s_benchmark_msg, NULL);
-    if (rc != RCL_RET_OK) {
-        ESP_LOGW(TAG, "Benchmark publish failed: %d", (int)rc);
-    }
+static void cb_int32(const void *msg_in) {
+    const benchmark_msgs__msg__BenchmarkInt32 *req = msg_in;
+    s_msg_int32.seq = req->seq;
+    s_msg_int32.stamp_send = req->stamp_send;
+    fill_recv_timestamp(&s_msg_int32.stamp_recv);
+    s_msg_int32.value = req->value;
+    rcl_publish(&s_pub_int32, &s_msg_int32, NULL);
+}
+
+static void cb_twist(const void *msg_in) {
+    const benchmark_msgs__msg__BenchmarkTwist *req = msg_in;
+    s_msg_twist.seq = req->seq;
+    s_msg_twist.stamp_send = req->stamp_send;
+    fill_recv_timestamp(&s_msg_twist.stamp_recv);
+    s_msg_twist.twist = req->twist; // Copy entire Twist message
+    rcl_publish(&s_pub_twist, &s_msg_twist, NULL);
+}
+
+static void cb_odom(const void *msg_in) {
+    const benchmark_msgs__msg__BenchmarkOdom *req = msg_in;
+    s_msg_odom.seq = req->seq;
+    s_msg_odom.stamp_send = req->stamp_send;
+    fill_recv_timestamp(&s_msg_odom.stamp_recv);
+    s_msg_odom.odom = req->odom; // Copy entire Odometry message
+    rcl_publish(&s_pub_odom, &s_msg_odom, NULL);
 }
 
 static void microros_init(void) {
@@ -326,26 +352,42 @@ static void microros_init(void) {
     RCCHECK(rclc_parameter_set_int(&s_param_server, PARAM_GREEN, s_params.green));
     RCCHECK(rclc_parameter_set_int(&s_param_server, PARAM_BLUE, s_params.blue));
 
-    // Initialize benchmark publisher (best effort for lower latency)
-    ESP_LOGI(TAG, "Initializing benchmark publisher...");
-    s_benchmark_pub = rcl_get_zero_initialized_publisher();
-    RCCHECK(rclc_publisher_init_best_effort(&s_benchmark_pub, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(benchmark_msgs, msg, Roundtrip), BENCHMARK_RESPONSE_TOPIC));
+    // Initialize benchmark pub/sub for all message types
+    ESP_LOGI(TAG, "Initializing benchmark endpoints...");
 
-    // Initialize benchmark subscriber (best effort for lower latency)
-    ESP_LOGI(TAG, "Initializing benchmark subscriber...");
-    s_benchmark_sub = rcl_get_zero_initialized_subscription();
-    RCCHECK(rclc_subscription_init_best_effort(&s_benchmark_sub, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(benchmark_msgs, msg, Roundtrip), BENCHMARK_REQUEST_TOPIC));
+    // Minimal
+    s_pub_minimal = rcl_get_zero_initialized_publisher();
+    RCCHECK(rclc_publisher_init_best_effort(&s_pub_minimal, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(benchmark_msgs, msg, BenchmarkMinimal), BENCH_MINIMAL_RES));
+    s_sub_minimal = rcl_get_zero_initialized_subscription();
+    RCCHECK(rclc_subscription_init_best_effort(&s_sub_minimal, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(benchmark_msgs, msg, BenchmarkMinimal), BENCH_MINIMAL_REQ));
 
-    // Add subscription to executor
-    RCCHECK(rclc_executor_add_subscription(&s_executor, &s_benchmark_sub, &s_benchmark_msg, &benchmark_callback, ON_NEW_DATA));
+    // Int32
+    s_pub_int32 = rcl_get_zero_initialized_publisher();
+    RCCHECK(rclc_publisher_init_best_effort(&s_pub_int32, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(benchmark_msgs, msg, BenchmarkInt32), BENCH_INT32_RES));
+    s_sub_int32 = rcl_get_zero_initialized_subscription();
+    RCCHECK(rclc_subscription_init_best_effort(&s_sub_int32, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(benchmark_msgs, msg, BenchmarkInt32), BENCH_INT32_REQ));
 
-    // Initialize message memory
-    benchmark_msgs__msg__Roundtrip__init(&s_benchmark_msg);
+    // Twist
+    s_pub_twist = rcl_get_zero_initialized_publisher();
+    RCCHECK(rclc_publisher_init_best_effort(&s_pub_twist, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(benchmark_msgs, msg, BenchmarkTwist), BENCH_TWIST_RES));
+    s_sub_twist = rcl_get_zero_initialized_subscription();
+    RCCHECK(rclc_subscription_init_best_effort(&s_sub_twist, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(benchmark_msgs, msg, BenchmarkTwist), BENCH_TWIST_REQ));
+
+    // Odom
+    s_pub_odom = rcl_get_zero_initialized_publisher();
+    RCCHECK(rclc_publisher_init_best_effort(&s_pub_odom, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(benchmark_msgs, msg, BenchmarkOdom), BENCH_ODOM_RES));
+    s_sub_odom = rcl_get_zero_initialized_subscription();
+    RCCHECK(rclc_subscription_init_best_effort(&s_sub_odom, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(benchmark_msgs, msg, BenchmarkOdom), BENCH_ODOM_REQ));
+
+    // Add subscriptions to executor
+    RCCHECK(rclc_executor_add_subscription(&s_executor, &s_sub_minimal, &s_msg_minimal, &cb_minimal, ON_NEW_DATA));
+    RCCHECK(rclc_executor_add_subscription(&s_executor, &s_sub_int32, &s_msg_int32, &cb_int32, ON_NEW_DATA));
+    RCCHECK(rclc_executor_add_subscription(&s_executor, &s_sub_twist, &s_msg_twist, &cb_twist, ON_NEW_DATA));
+    RCCHECK(rclc_executor_add_subscription(&s_executor, &s_sub_odom, &s_msg_odom, &cb_odom, ON_NEW_DATA));
 
     ESP_LOGI(TAG, "=== micro-ROS Init Complete ===");
     ESP_LOGI(TAG, "Node: /%s/%s", NODE_NAMESPACE, NODE_NAME);
-    ESP_LOGI(TAG, "Benchmark: %s -> %s", BENCHMARK_REQUEST_TOPIC, BENCHMARK_RESPONSE_TOPIC);
-    ESP_LOGI(TAG, "Try: ros2 param list /%s/%s", NODE_NAMESPACE, NODE_NAME);
+    ESP_LOGI(TAG, "Benchmark topics: minimal, int32, twist, odom");
 }
 
 static void microros_task(void *arg) {

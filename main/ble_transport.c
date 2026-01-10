@@ -109,8 +109,23 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
                 g_ctx->connected = true;
                 g_ctx->conn_id = g_conn_handle;
             }
+
+            // Request MTU exchange for larger packets
             ble_gattc_exchange_mtu(g_conn_handle, NULL, NULL);
-            ESP_LOGI(TAG, "Connected");
+
+            // Request faster connection interval (7.5ms - 15ms) for higher throughput
+            struct ble_gap_upd_params conn_params = {
+                .itvl_min = 6,              // 7.5ms  (units of 1.25ms)
+                .itvl_max = 12,             // 15ms
+                .latency = 0,               // No slave latency for max responsiveness
+                .supervision_timeout = 400, // 4 seconds
+            };
+            ble_gap_update_params(g_conn_handle, &conn_params);
+
+            // Enable Data Length Extension for larger link layer packets
+            ble_gap_set_data_len(g_conn_handle, 251, 2120);
+
+            ESP_LOGI(TAG, "Connected - requesting fast CI and DLE");
         } else {
             start_advertise();
         }
