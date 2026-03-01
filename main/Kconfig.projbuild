@@ -6,37 +6,6 @@ menu "micro-ROS BLE Transport"
         help
             The Bluetooth device name advertised by the ESP32.
 
-    menu "LED Parameters (defaults)"
-        config MICROROS_LED_DEFAULT_BRIGHTNESS
-            int "Default LED Brightness"
-            default 64
-            range 0 255
-            help
-                Default LED brightness (0-255).
-                Can be changed at runtime via ROS2 parameter.
-
-        config MICROROS_LED_DEFAULT_RED
-            int "Default LED Red"
-            default 0
-            range 0 255
-            help
-                Default red channel value (0-255).
-
-        config MICROROS_LED_DEFAULT_GREEN
-            int "Default LED Green"
-            default 0
-            range 0 255
-            help
-                Default green channel value (0-255).
-
-        config MICROROS_LED_DEFAULT_BLUE
-            int "Default LED Blue"
-            default 64
-            range 0 255
-            help
-                Default blue channel value (0-255).
-    endmenu
-
     config MICROROS_BLE_RX_QUEUE_SIZE
         int "RX Queue Size"
         default 16
@@ -74,19 +43,5 @@ menu "micro-ROS BLE Transport"
         help
             Delay between BLE notification chunks.
             Helps avoid buffer overflow on slow connections.
-
-    menu "Benchmark Configuration"
-        config MICROROS_BENCHMARK_REQUEST_TOPIC
-            string "Benchmark Request Topic"
-            default "/benchmark/request"
-            help
-                Topic for receiving benchmark roundtrip requests from host.
-
-        config MICROROS_BENCHMARK_RESPONSE_TOPIC
-            string "Benchmark Response Topic"
-            default "/benchmark/response"
-            help
-                Topic for publishing benchmark roundtrip responses to host.
-    endmenu
 
 endmenu

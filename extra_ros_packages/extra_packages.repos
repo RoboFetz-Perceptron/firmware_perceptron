@@ -1,0 +1,5 @@
+repositories:
+  benchmark_msgs:
+    type: git
+    url: git@github.com:RoboFetz-Perceptron/perceptron_msgs.git
+    version: main
