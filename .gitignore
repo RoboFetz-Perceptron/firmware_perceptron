@@ -6,3 +6,4 @@ managed_components
 micro_ros_src
 traces
 dependencies.lock
+.claude
