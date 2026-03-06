@@ -1,4 +1,4 @@
-#include "include/robot_control.h"
+#include "include/control.h"
 
 #include <math.h>
 
@@ -10,7 +10,7 @@
 #include <esp_adc/adc_oneshot.h>
 #include <esp_log.h>
 
-#define TAG "ROBOT"
+#define TAG "PERCEPTRON"
 #define NUM_MOTORS 3
 #define SQRT3_2 0.866025403784f
 #define PERIOD_TICKS (MOTOR_MCPWM_RESOLUTION_HZ / MOTOR_MCPWM_FREQ_HZ)
@@ -50,7 +50,7 @@ static void set_motor(int idx, float speed) {
     }
 }
 
-esp_err_t robot_init(void) {
+esp_err_t control_init(void) {
     gpio_config_t en_cfg = {
         .pin_bit_mask = (1ULL << MOTOR_ENABLE_GPIO),
         .mode = GPIO_MODE_OUTPUT,
@@ -141,7 +141,7 @@ esp_err_t robot_init(void) {
     return ESP_OK;
 }
 
-void robot_set_enabled(bool enabled) {
+void control_set_enabled(bool enabled) {
     if (!enabled) {
         for (int i = 0; i < NUM_MOTORS; i++)
             set_motor(i, 0.0f);
@@ -167,7 +167,7 @@ void robot_set_enabled(bool enabled) {
  *
  * When flipped: negate vx, vy, omega (all motor directions reverse).
  */
-void robot_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty, bool is_flipped) {
+void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty, bool is_flipped) {
     float vx = twist->linear.x;
     float vy = twist->linear.y;
     float omega = twist->angular.z;
@@ -203,17 +203,17 @@ void robot_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty, b
     ESP_LOGD(TAG, "vx=%.2f vy=%.2f w=%.2f %s -> u[%.2f,%.2f,%.2f] wpn=%u", twist->linear.x, twist->linear.y, twist->angular.z, is_flipped ? "FLIP" : "", u[0], u[1], u[2], weapon_duty);
 }
 
-void robot_set_reversed(int motor_idx, bool reversed) {
+void control_set_reversed(int motor_idx, bool reversed) {
     if (motor_idx >= 0 && motor_idx < NUM_MOTORS)
         s_motor_reversed[motor_idx] = reversed;
 }
 
-void robot_set_weapon_pulse_range(uint32_t min_us, uint32_t max_us) {
+void control_set_weapon_pulse_range(uint32_t min_us, uint32_t max_us) {
     s_weapon_pulse_min_us = min_us;
     s_weapon_pulse_max_us = max_us;
 }
 
-float robot_read_battery_voltage(void) {
+float control_read_battery_voltage(void) {
     int raw;
     int mv;
     adc_oneshot_read(s_adc_handle, ADC_CHANNEL_1, &raw);

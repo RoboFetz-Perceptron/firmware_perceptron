@@ -1,47 +1,23 @@
-menu "micro-ROS BLE Transport"
+menu "Perceptron"
 
-    config MICROROS_BLE_DEVICE_NAME
-        string "BLE Device Name"
-        default "microROS_BLE"
-        help
-            The Bluetooth device name advertised by the ESP32.
+    config PERCEPTRON_NODE_NAME
+        string "ROS node name"
+        default "perceptron"
 
-    config MICROROS_BLE_RX_QUEUE_SIZE
-        int "RX Queue Size"
-        default 16
-        range 4 64
-        help
-            Number of packets that can be queued for reception.
-            Increase if you experience packet drops.
+    config PERCEPTRON_NODE_NAMESPACE
+        string "ROS namespace"
+        default "perceptron"
 
-    config MICROROS_BLE_RX_BUFFER_SIZE
-        int "RX Buffer Size (bytes)"
-        default 512
-        range 64 1024
-        help
-            Maximum size of a single received packet.
-            Should be at least as large as the negotiated MTU.
+    config PERCEPTRON_BLE_DEVICE_NAME
+        string "BLE device name"
+        default "Perceptron"
 
-    config MICROROS_BLE_ADV_INTERVAL_MIN
-        hex "Advertising Interval Min (units of 0.625ms)"
-        default 0x20
+    config PERCEPTRON_ROSLOG
+        bool "Publish ESP_LOG to ROS topic"
+        default y
         help
-            Minimum advertising interval.
-            0x20 = 20ms, 0x40 = 40ms, 0x100 = 160ms
-
-    config MICROROS_BLE_ADV_INTERVAL_MAX
-        hex "Advertising Interval Max (units of 0.625ms)"
-        default 0x40
-        help
-            Maximum advertising interval.
-            Should be >= min interval.
-
-    config MICROROS_BLE_TX_CHUNK_DELAY_MS
-        int "TX Inter-chunk Delay (ms)"
-        default 2
-        range 0 20
-        help
-            Delay between BLE notification chunks.
-            Helps avoid buffer overflow on slow connections.
+            Forward ESP_LOG messages tagged PERCEPTRON to a ROS String
+            topic (roslog). Useful for debugging over ROS but adds
+            overhead. Disable for production deployments.
 
 endmenu

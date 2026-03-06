@@ -26,7 +26,12 @@ static uint8_t g_addr_type;
 static bool g_notify_enabled = false;
 
 static StreamBufferHandle_t g_rx_stream = NULL;
-#define RX_BUFFER_SIZE (CONFIG_MICROROS_BLE_RX_BUFFER_SIZE * CONFIG_MICROROS_BLE_RX_QUEUE_SIZE)
+#define RX_QUEUE_SIZE 16
+#define RX_PKT_SIZE 512
+#define RX_BUFFER_SIZE (RX_PKT_SIZE * RX_QUEUE_SIZE)
+#define ADV_INTERVAL_MIN 0x20
+#define ADV_INTERVAL_MAX 0x40
+#define TX_CHUNK_DELAY_MS 2
 
 static void start_advertise(void);
 static int gap_event_cb(struct ble_gap_event *event, void *arg);
@@ -74,8 +79,8 @@ static const struct ble_gatt_svc_def gatt_services[] = {{
 static void start_advertise(void) {
     struct ble_hs_adv_fields adv = {
         .flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP,
-        .name = (uint8_t *)CONFIG_MICROROS_BLE_DEVICE_NAME,
-        .name_len = strlen(CONFIG_MICROROS_BLE_DEVICE_NAME),
+        .name = (uint8_t *)CONFIG_PERCEPTRON_BLE_DEVICE_NAME,
+        .name_len = strlen(CONFIG_PERCEPTRON_BLE_DEVICE_NAME),
         .name_is_complete = 1,
     };
     ble_gap_adv_set_fields(&adv);
@@ -90,12 +95,12 @@ static void start_advertise(void) {
     struct ble_gap_adv_params params = {
         .conn_mode = BLE_GAP_CONN_MODE_UND,
         .disc_mode = BLE_GAP_DISC_MODE_GEN,
-        .itvl_min = CONFIG_MICROROS_BLE_ADV_INTERVAL_MIN,
-        .itvl_max = CONFIG_MICROROS_BLE_ADV_INTERVAL_MAX,
+        .itvl_min = ADV_INTERVAL_MIN,
+        .itvl_max = ADV_INTERVAL_MAX,
     };
     ble_gap_adv_start(g_addr_type, NULL, BLE_HS_FOREVER, &params, gap_event_cb, NULL);
 
-    ESP_LOGI(TAG, "Advertising '%s'", CONFIG_MICROROS_BLE_DEVICE_NAME);
+    ESP_LOGI(TAG, "Advertising '%s'", CONFIG_PERCEPTRON_BLE_DEVICE_NAME);
 }
 
 static int gap_event_cb(struct ble_gap_event *event, void *arg) {
@@ -219,7 +224,7 @@ bool microros_ble_init(ble_transport_ctx_t *ctx) {
         return false;
     }
 
-    ble_svc_gap_device_name_set(CONFIG_MICROROS_BLE_DEVICE_NAME);
+    ble_svc_gap_device_name_set(CONFIG_PERCEPTRON_BLE_DEVICE_NAME);
     nimble_port_freertos_init(ble_task);
 
     ESP_LOGI(TAG, "Initialized");
@@ -260,7 +265,7 @@ size_t ble_transport_write(struct uxrCustomTransport *transport, const uint8_t *
 
         sent += to_send;
         if (sent < len)
-            vTaskDelay(pdMS_TO_TICKS(CONFIG_MICROROS_BLE_TX_CHUNK_DELAY_MS));
+            vTaskDelay(pdMS_TO_TICKS(TX_CHUNK_DELAY_MS));
     }
 
     return sent;

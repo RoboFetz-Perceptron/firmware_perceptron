@@ -1,5 +1,5 @@
-#ifndef ROBOT_CONTROL_H
-#define ROBOT_CONTROL_H
+#ifndef CONTROL_H
+#define CONTROL_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -37,11 +37,11 @@
 
 #define ROBOT_RADIUS_M 0.1f
 
-esp_err_t robot_init(void);
-void robot_set_enabled(bool enabled);
-void robot_set_reversed(int motor_idx, bool reversed);
-void robot_set_weapon_pulse_range(uint32_t min_us, uint32_t max_us);
-void robot_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty, bool is_flipped);
-float robot_read_battery_voltage(void);
+esp_err_t control_init(void);
+void control_set_enabled(bool enabled);
+void control_set_reversed(int motor_idx, bool reversed);
+void control_set_weapon_pulse_range(uint32_t min_us, uint32_t max_us);
+void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty, bool is_flipped);
+float control_read_battery_voltage(void);
 
 #endif
