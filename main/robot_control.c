@@ -1,13 +1,16 @@
-#include "include/motor_control.h"
+#include "include/robot_control.h"
 
 #include <math.h>
 
 #include <driver/gpio.h>
 #include <driver/ledc.h>
 #include <driver/mcpwm_prelude.h>
+#include <esp_adc/adc_oneshot.h>
+#include <esp_adc/adc_cali.h>
+#include <esp_adc/adc_cali_scheme.h>
 #include <esp_log.h>
 
-#define TAG "MOTOR"
+#define TAG "ROBOT"
 #define NUM_MOTORS 3
 #define SQRT3_2 0.866025403784f
 #define PERIOD_TICKS (MOTOR_MCPWM_RESOLUTION_HZ / MOTOR_MCPWM_FREQ_HZ)
@@ -17,12 +20,18 @@ static mcpwm_oper_handle_t s_operators[NUM_MOTORS];
 static mcpwm_cmpr_handle_t s_comparators[NUM_MOTORS];
 static mcpwm_gen_handle_t s_gen_in1[NUM_MOTORS];
 static mcpwm_gen_handle_t s_gen_in2[NUM_MOTORS];
+static bool s_motor_reversed[NUM_MOTORS] = {false, false, false};
+
+static adc_oneshot_unit_handle_t s_adc_handle;
+static adc_cali_handle_t s_adc_cali_handle;
 
 static const int s_in1_pins[] = {MOTOR1_IN1_GPIO, MOTOR2_IN1_GPIO, MOTOR3_IN1_GPIO};
 static const int s_in2_pins[] = {MOTOR1_IN2_GPIO, MOTOR2_IN2_GPIO, MOTOR3_IN2_GPIO};
 
 static void set_motor(int idx, float speed) {
     float clamped = fmaxf(-1.0f, fminf(1.0f, speed));
+    if (s_motor_reversed[idx])
+        clamped = -clamped;
     uint32_t duty = (uint32_t)(fabsf(clamped) * PERIOD_TICKS);
 
     mcpwm_comparator_set_compare_value(s_comparators[idx], duty);
@@ -39,7 +48,7 @@ static void set_motor(int idx, float speed) {
     }
 }
 
-esp_err_t motor_control_init(void) {
+esp_err_t robot_init(void) {
     gpio_config_t en_cfg = {
         .pin_bit_mask = (1ULL << MOTOR_ENABLE_GPIO),
         .mode = GPIO_MODE_OUTPUT,
@@ -74,7 +83,6 @@ esp_err_t motor_control_init(void) {
         mcpwm_generator_config_t gen2_cfg = {.gen_gpio_num = s_in2_pins[i]};
         ESP_ERROR_CHECK(mcpwm_new_generator(s_operators[i], &gen2_cfg, &s_gen_in2[i]));
 
-        // PWM pattern: high at period start, low at compare match
         ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(s_gen_in1[i],
             MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_HIGH)));
         ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(s_gen_in1[i],
@@ -85,7 +93,6 @@ esp_err_t motor_control_init(void) {
         ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(s_gen_in2[i],
             MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, s_comparators[i], MCPWM_GEN_ACTION_LOW)));
 
-        // Start with both forced low
         ESP_ERROR_CHECK(mcpwm_generator_set_force_level(s_gen_in1[i], 0, true));
         ESP_ERROR_CHECK(mcpwm_generator_set_force_level(s_gen_in2[i], 0, true));
 
@@ -112,15 +119,37 @@ esp_err_t motor_control_init(void) {
     };
     ESP_ERROR_CHECK(ledc_channel_config(&ledc_ch));
 
-    ESP_LOGI(TAG, "Initialized: M1(%d,%d) M2(%d,%d) M3(%d,%d) wpn(%d) en(%d)",
+    adc_oneshot_unit_init_cfg_t adc_cfg = {
+        .unit_id = ADC_UNIT_1,
+        .ulp_mode = ADC_ULP_MODE_DISABLE,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(&adc_cfg, &s_adc_handle));
+
+    adc_oneshot_chan_cfg_t chan_cfg = {
+        .atten = ADC_ATTEN_DB_12,
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(s_adc_handle, ADC_CHANNEL_1,
+                                                &chan_cfg));
+
+    adc_cali_curve_fitting_config_t cali_cfg = {
+        .unit_id = ADC_UNIT_1,
+        .chan = ADC_CHANNEL_1,
+        .atten = ADC_ATTEN_DB_12,
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+    };
+    ESP_ERROR_CHECK(adc_cali_create_scheme_curve_fitting(&cali_cfg,
+                                                          &s_adc_cali_handle));
+
+    ESP_LOGI(TAG, "Initialized: M1(%d,%d) M2(%d,%d) M3(%d,%d) wpn(%d) en(%d) bat(%d)",
              MOTOR1_IN1_GPIO, MOTOR1_IN2_GPIO,
              MOTOR2_IN1_GPIO, MOTOR2_IN2_GPIO,
              MOTOR3_IN1_GPIO, MOTOR3_IN2_GPIO,
-             WEAPON_PWM_GPIO, MOTOR_ENABLE_GPIO);
+             WEAPON_PWM_GPIO, MOTOR_ENABLE_GPIO, BATTERY_ADC_GPIO);
     return ESP_OK;
 }
 
-void motor_control_set_enabled(bool enabled) {
+void robot_set_enabled(bool enabled) {
     if (!enabled) {
         for (int i = 0; i < NUM_MOTORS; i++)
             set_motor(i, 0.0f);
@@ -134,29 +163,36 @@ void motor_control_set_enabled(bool enabled) {
 /*
  * Inverse kinematics: robot velocity (vx, vy, omega) -> wheel speeds (u0, u1, u2)
  *
- * u_i = -vx * sin(phi_i) + vy * cos(phi_i) + R * omega
+ * u_i = -sin(phi_i) * vx + cos(phi_i) * vy + R * omega
  *
- * | u0 |   | -sqrt(3)/2    1/2   R | | vx    |
- * | u1 | = |  0           -1     R | | vy    |
- * | u2 |   |  sqrt(3)/2    1/2   R | | omega |
+ * Wheel positions (phi_i measured CCW from forward +x axis):
+ *   Motor 1 (rear):        phi_0 = 180°
+ *   Motor 2 (front-right): phi_1 = -60°
+ *   Motor 3 (front-left):  phi_2 =  60°
  *
- * Forward kinematics (unused, for future odometry):
+ * | u0 |   |  0           -1     R | | vx    |
+ * | u1 | = |  sqrt(3)/2    1/2   R | | vy    |
+ * | u2 |   | -sqrt(3)/2    1/2   R | | omega |
  *
- * | vx    |   | -sqrt(3)/3     0       sqrt(3)/3 | | u0 |
- * | vy    | = |  1/3          -2/3      1/3      | | u1 |
- * | omega |   |  1/(3R)        1/(3R)   1/(3R)   | | u2 |
+ * When flipped: negate vx, vy, omega (all motor directions reverse).
  */
-void motor_control_update(const perceptron_msgs__msg__RcCarCommand *cmd) {
-    float vx = cmd->cmd_vel.linear.x;
-    float vy = cmd->cmd_vel.linear.y;
-    float omega = cmd->cmd_vel.angular.z;
+void robot_update(const geometry_msgs__msg__Twist *twist,
+                  uint8_t weapon_duty, bool is_flipped) {
+    float vx = twist->linear.x;
+    float vy = twist->linear.y;
+    float omega = twist->angular.z;
+
+    if (is_flipped) {
+        vx = -vx;
+        vy = -vy;
+        omega = -omega;
+    }
 
     float u[3];
-    u[0] = -SQRT3_2 * vx + 0.5f * vy + ROBOT_RADIUS_M * omega;
-    u[1] =                 -1.0f * vy + ROBOT_RADIUS_M * omega;
-    u[2] =  SQRT3_2 * vx + 0.5f * vy + ROBOT_RADIUS_M * omega;
+    u[0] =                 -1.0f * vy + ROBOT_RADIUS_M * omega;
+    u[1] =  SQRT3_2 * vx + 0.5f * vy + ROBOT_RADIUS_M * omega;
+    u[2] = -SQRT3_2 * vx + 0.5f * vy + ROBOT_RADIUS_M * omega;
 
-    // Normalize: if any wheel exceeds 1.0, scale all down proportionally
     float max_u = fmaxf(fmaxf(fabsf(u[0]), fabsf(u[1])), fabsf(u[2]));
     if (max_u > 1.0f) {
         float scale = 1.0f / max_u;
@@ -168,11 +204,26 @@ void motor_control_update(const perceptron_msgs__msg__RcCarCommand *cmd) {
     for (int i = 0; i < NUM_MOTORS; i++)
         set_motor(i, u[i]);
 
-    // Weapon motor: duty 0-255 mapped to LEDC resolution
-    uint32_t wpn_duty = (cmd->weapon_duty * ((1 << WEAPON_LEDC_RESOLUTION) - 1)) / 255;
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, WEAPON_LEDC_CHANNEL, wpn_duty);
+    uint32_t wpn = (weapon_duty * ((1 << WEAPON_LEDC_RESOLUTION) - 1)) / 255;
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, WEAPON_LEDC_CHANNEL, wpn);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, WEAPON_LEDC_CHANNEL);
 
-    ESP_LOGD(TAG, "vx=%.2f vy=%.2f w=%.2f -> u[%.2f,%.2f,%.2f] wpn=%u",
-             vx, vy, omega, u[0], u[1], u[2], cmd->weapon_duty);
+    ESP_LOGD(TAG, "vx=%.2f vy=%.2f w=%.2f %s -> u[%.2f,%.2f,%.2f] wpn=%u",
+             twist->linear.x, twist->linear.y, twist->angular.z,
+             is_flipped ? "FLIP" : "", u[0], u[1], u[2], weapon_duty);
+}
+
+void robot_set_reversed(int motor_idx, bool reversed) {
+    if (motor_idx >= 0 && motor_idx < NUM_MOTORS) {
+        s_motor_reversed[motor_idx] = reversed;
+        ESP_LOGI(TAG, "Motor %d reversed=%d", motor_idx + 1, reversed);
+    }
+}
+
+float robot_read_battery_voltage(void) {
+    int raw;
+    int mv;
+    adc_oneshot_read(s_adc_handle, ADC_CHANNEL_1, &raw);
+    adc_cali_raw_to_voltage(s_adc_cali_handle, raw, &mv);
+    return (mv / 1000.0f) * BATTERY_DIVIDER_RATIO;
 }
