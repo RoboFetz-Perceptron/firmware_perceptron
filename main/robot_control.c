@@ -5,9 +5,9 @@
 #include <driver/gpio.h>
 #include <driver/ledc.h>
 #include <driver/mcpwm_prelude.h>
-#include <esp_adc/adc_oneshot.h>
 #include <esp_adc/adc_cali.h>
 #include <esp_adc/adc_cali_scheme.h>
+#include <esp_adc/adc_oneshot.h>
 #include <esp_log.h>
 
 #define TAG "ROBOT"
@@ -21,6 +21,8 @@ static mcpwm_cmpr_handle_t s_comparators[NUM_MOTORS];
 static mcpwm_gen_handle_t s_gen_in1[NUM_MOTORS];
 static mcpwm_gen_handle_t s_gen_in2[NUM_MOTORS];
 static bool s_motor_reversed[NUM_MOTORS] = {false, false, false};
+static uint32_t s_weapon_pulse_min_us = WEAPON_PULSE_MIN_US_DEFAULT;
+static uint32_t s_weapon_pulse_max_us = WEAPON_PULSE_MAX_US_DEFAULT;
 
 static adc_oneshot_unit_handle_t s_adc_handle;
 static adc_cali_handle_t s_adc_cali_handle;
@@ -83,15 +85,11 @@ esp_err_t robot_init(void) {
         mcpwm_generator_config_t gen2_cfg = {.gen_gpio_num = s_in2_pins[i]};
         ESP_ERROR_CHECK(mcpwm_new_generator(s_operators[i], &gen2_cfg, &s_gen_in2[i]));
 
-        ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(s_gen_in1[i],
-            MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_HIGH)));
-        ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(s_gen_in1[i],
-            MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, s_comparators[i], MCPWM_GEN_ACTION_LOW)));
+        ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(s_gen_in1[i], MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_HIGH)));
+        ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(s_gen_in1[i], MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, s_comparators[i], MCPWM_GEN_ACTION_LOW)));
 
-        ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(s_gen_in2[i],
-            MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_HIGH)));
-        ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(s_gen_in2[i],
-            MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, s_comparators[i], MCPWM_GEN_ACTION_LOW)));
+        ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(s_gen_in2[i], MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_HIGH)));
+        ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(s_gen_in2[i], MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, s_comparators[i], MCPWM_GEN_ACTION_LOW)));
 
         ESP_ERROR_CHECK(mcpwm_generator_set_force_level(s_gen_in1[i], 0, true));
         ESP_ERROR_CHECK(mcpwm_generator_set_force_level(s_gen_in2[i], 0, true));
@@ -129,8 +127,7 @@ esp_err_t robot_init(void) {
         .atten = ADC_ATTEN_DB_12,
         .bitwidth = ADC_BITWIDTH_DEFAULT,
     };
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(s_adc_handle, ADC_CHANNEL_1,
-                                                &chan_cfg));
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(s_adc_handle, ADC_CHANNEL_1, &chan_cfg));
 
     adc_cali_curve_fitting_config_t cali_cfg = {
         .unit_id = ADC_UNIT_1,
@@ -138,14 +135,9 @@ esp_err_t robot_init(void) {
         .atten = ADC_ATTEN_DB_12,
         .bitwidth = ADC_BITWIDTH_DEFAULT,
     };
-    ESP_ERROR_CHECK(adc_cali_create_scheme_curve_fitting(&cali_cfg,
-                                                          &s_adc_cali_handle));
+    ESP_ERROR_CHECK(adc_cali_create_scheme_curve_fitting(&cali_cfg, &s_adc_cali_handle));
 
-    ESP_LOGI(TAG, "Initialized: M1(%d,%d) M2(%d,%d) M3(%d,%d) wpn(%d) en(%d) bat(%d)",
-             MOTOR1_IN1_GPIO, MOTOR1_IN2_GPIO,
-             MOTOR2_IN1_GPIO, MOTOR2_IN2_GPIO,
-             MOTOR3_IN1_GPIO, MOTOR3_IN2_GPIO,
-             WEAPON_PWM_GPIO, MOTOR_ENABLE_GPIO, BATTERY_ADC_GPIO);
+    ESP_LOGI(TAG, "HW init OK");
     return ESP_OK;
 }
 
@@ -157,7 +149,6 @@ void robot_set_enabled(bool enabled) {
         ledc_update_duty(LEDC_LOW_SPEED_MODE, WEAPON_LEDC_CHANNEL);
     }
     gpio_set_level(MOTOR_ENABLE_GPIO, enabled ? 1 : 0);
-    ESP_LOGI(TAG, "Power %s", enabled ? "enabled" : "disabled");
 }
 
 /*
@@ -176,8 +167,7 @@ void robot_set_enabled(bool enabled) {
  *
  * When flipped: negate vx, vy, omega (all motor directions reverse).
  */
-void robot_update(const geometry_msgs__msg__Twist *twist,
-                  uint8_t weapon_duty, bool is_flipped) {
+void robot_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty, bool is_flipped) {
     float vx = twist->linear.x;
     float vy = twist->linear.y;
     float omega = twist->angular.z;
@@ -189,8 +179,8 @@ void robot_update(const geometry_msgs__msg__Twist *twist,
     }
 
     float u[3];
-    u[0] =                 -1.0f * vy + ROBOT_RADIUS_M * omega;
-    u[1] =  SQRT3_2 * vx + 0.5f * vy + ROBOT_RADIUS_M * omega;
+    u[0] = -1.0f * vy + ROBOT_RADIUS_M * omega;
+    u[1] = SQRT3_2 * vx + 0.5f * vy + ROBOT_RADIUS_M * omega;
     u[2] = -SQRT3_2 * vx + 0.5f * vy + ROBOT_RADIUS_M * omega;
 
     float max_u = fmaxf(fmaxf(fabsf(u[0]), fabsf(u[1])), fabsf(u[2]));
@@ -204,20 +194,23 @@ void robot_update(const geometry_msgs__msg__Twist *twist,
     for (int i = 0; i < NUM_MOTORS; i++)
         set_motor(i, u[i]);
 
-    uint32_t wpn = (weapon_duty * ((1 << WEAPON_LEDC_RESOLUTION) - 1)) / 255;
+    uint32_t pulse_min = WEAPON_US_TO_TICKS(s_weapon_pulse_min_us);
+    uint32_t pulse_max = WEAPON_US_TO_TICKS(s_weapon_pulse_max_us);
+    uint32_t wpn = pulse_min + (weapon_duty * (pulse_max - pulse_min)) / 255;
     ledc_set_duty(LEDC_LOW_SPEED_MODE, WEAPON_LEDC_CHANNEL, wpn);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, WEAPON_LEDC_CHANNEL);
 
-    ESP_LOGD(TAG, "vx=%.2f vy=%.2f w=%.2f %s -> u[%.2f,%.2f,%.2f] wpn=%u",
-             twist->linear.x, twist->linear.y, twist->angular.z,
-             is_flipped ? "FLIP" : "", u[0], u[1], u[2], weapon_duty);
+    ESP_LOGD(TAG, "vx=%.2f vy=%.2f w=%.2f %s -> u[%.2f,%.2f,%.2f] wpn=%u", twist->linear.x, twist->linear.y, twist->angular.z, is_flipped ? "FLIP" : "", u[0], u[1], u[2], weapon_duty);
 }
 
 void robot_set_reversed(int motor_idx, bool reversed) {
-    if (motor_idx >= 0 && motor_idx < NUM_MOTORS) {
+    if (motor_idx >= 0 && motor_idx < NUM_MOTORS)
         s_motor_reversed[motor_idx] = reversed;
-        ESP_LOGI(TAG, "Motor %d reversed=%d", motor_idx + 1, reversed);
-    }
+}
+
+void robot_set_weapon_pulse_range(uint32_t min_us, uint32_t max_us) {
+    s_weapon_pulse_min_us = min_us;
+    s_weapon_pulse_max_us = max_us;
 }
 
 float robot_read_battery_voltage(void) {
