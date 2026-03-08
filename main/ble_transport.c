@@ -250,6 +250,7 @@ size_t ble_transport_write(struct uxrCustomTransport *transport, const uint8_t *
         return 0;
     }
 
+    // MTU minus 3 bytes ATT header, fallback to default 20
     size_t chunk = g_ctx->mtu_size > 3 ? g_ctx->mtu_size - 3 : 20;
     size_t sent = 0;
 

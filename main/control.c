@@ -38,19 +38,21 @@ static void set_motor(int idx, float speed) {
 
     mcpwm_comparator_set_compare_value(s_comparators[idx], duty);
 
+    // -1 releases force (re-enables PWM), 0 forces output low
     if (clamped > 0.001f) {
-        mcpwm_generator_set_force_level(s_gen_in1[idx], -1, true);
-        mcpwm_generator_set_force_level(s_gen_in2[idx], 0, true);
+        mcpwm_generator_set_force_level(s_gen_in1[idx], -1, true); // IN1 = PWM
+        mcpwm_generator_set_force_level(s_gen_in2[idx], 0, true);  // IN2 = LOW
     } else if (clamped < -0.001f) {
-        mcpwm_generator_set_force_level(s_gen_in1[idx], 0, true);
-        mcpwm_generator_set_force_level(s_gen_in2[idx], -1, true);
+        mcpwm_generator_set_force_level(s_gen_in1[idx], 0, true);  // IN1 = LOW
+        mcpwm_generator_set_force_level(s_gen_in2[idx], -1, true); // IN2 = PWM
     } else {
-        mcpwm_generator_set_force_level(s_gen_in1[idx], 0, true);
+        mcpwm_generator_set_force_level(s_gen_in1[idx], 0, true); // brake
         mcpwm_generator_set_force_level(s_gen_in2[idx], 0, true);
     }
 }
 
 esp_err_t control_init(void) {
+    // Motor driver enable pin, active high, pulled low at boot to keep motors off
     gpio_config_t en_cfg = {
         .pin_bit_mask = (1ULL << MOTOR_ENABLE_GPIO),
         .mode = GPIO_MODE_OUTPUT,
@@ -61,36 +63,45 @@ esp_err_t control_init(void) {
     ESP_ERROR_CHECK(gpio_config(&en_cfg));
     gpio_set_level(MOTOR_ENABLE_GPIO, 0);
 
+    // MCPWM: one timer + operator + comparator + two generators (IN1/IN2) per motor
+    // Each H-bridge input gets its own generator so we can independently force-level them
     for (int i = 0; i < NUM_MOTORS; i++) {
         mcpwm_timer_config_t timer_cfg = {
             .group_id = MOTOR_MCPWM_GROUP_ID,
             .clk_src = MCPWM_TIMER_CLK_SRC_DEFAULT,
-            .resolution_hz = MOTOR_MCPWM_RESOLUTION_HZ,
-            .period_ticks = PERIOD_TICKS,
-            .count_mode = MCPWM_TIMER_COUNT_MODE_UP,
+            .resolution_hz = MOTOR_MCPWM_RESOLUTION_HZ, // 10MHz tick, gives fine duty control
+            .period_ticks = PERIOD_TICKS,               // 10MHz / 25kHz = 400 ticks per cycle
+            .count_mode = MCPWM_TIMER_COUNT_MODE_UP,    // simple sawtooth waveform
         };
         ESP_ERROR_CHECK(mcpwm_new_timer(&timer_cfg, &s_timers[i]));
 
+        // Operator links a timer to comparators and generators
         mcpwm_operator_config_t oper_cfg = {.group_id = MOTOR_MCPWM_GROUP_ID};
         ESP_ERROR_CHECK(mcpwm_new_operator(&oper_cfg, &s_operators[i]));
         ESP_ERROR_CHECK(mcpwm_operator_connect_timer(s_operators[i], s_timers[i]));
 
+        // Comparator sets the duty cycle threshold; update_cmp_on_tez avoids glitches
+        // by only loading new compare values when timer reaches zero
         mcpwm_comparator_config_t cmpr_cfg = {.flags.update_cmp_on_tez = true};
         ESP_ERROR_CHECK(mcpwm_new_comparator(s_operators[i], &cmpr_cfg, &s_comparators[i]));
         ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(s_comparators[i], 0));
 
+        // Two generators per motor: IN1 and IN2 of the H-bridge
         mcpwm_generator_config_t gen1_cfg = {.gen_gpio_num = s_in1_pins[i]};
         ESP_ERROR_CHECK(mcpwm_new_generator(s_operators[i], &gen1_cfg, &s_gen_in1[i]));
 
         mcpwm_generator_config_t gen2_cfg = {.gen_gpio_num = s_in2_pins[i]};
         ESP_ERROR_CHECK(mcpwm_new_generator(s_operators[i], &gen2_cfg, &s_gen_in2[i]));
 
+        // PWM pattern: output goes HIGH when timer resets (empty), LOW at compare match
+        // Both generators share the same comparator, set_motor() uses force-level
+        // to route PWM to only one input while holding the other low
         ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(s_gen_in1[i], MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_HIGH)));
         ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(s_gen_in1[i], MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, s_comparators[i], MCPWM_GEN_ACTION_LOW)));
-
         ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(s_gen_in2[i], MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_HIGH)));
         ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(s_gen_in2[i], MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, s_comparators[i], MCPWM_GEN_ACTION_LOW)));
 
+        // Start with both outputs forced low (brake mode)
         ESP_ERROR_CHECK(mcpwm_generator_set_force_level(s_gen_in1[i], 0, true));
         ESP_ERROR_CHECK(mcpwm_generator_set_force_level(s_gen_in2[i], 0, true));
 
@@ -98,11 +109,12 @@ esp_err_t control_init(void) {
         ESP_ERROR_CHECK(mcpwm_timer_start_stop(s_timers[i], MCPWM_TIMER_START_NO_STOP));
     }
 
+    // LEDC for weapon ESC, 50Hz RC servo PWM with 14-bit resolution (16384 ticks per 20ms)
     ledc_timer_config_t ledc_timer = {
-        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .speed_mode = LEDC_LOW_SPEED_MODE, // ESP32-C6 only has low-speed LEDC channels
         .timer_num = WEAPON_LEDC_TIMER,
-        .duty_resolution = WEAPON_LEDC_RESOLUTION,
-        .freq_hz = WEAPON_LEDC_FREQ_HZ,
+        .duty_resolution = WEAPON_LEDC_RESOLUTION, // 14-bit = ~1.2us per tick at 50Hz
+        .freq_hz = WEAPON_LEDC_FREQ_HZ,            // 50Hz standard RC PWM frequency
         .clk_cfg = LEDC_AUTO_CLK,
     };
     ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
@@ -112,23 +124,25 @@ esp_err_t control_init(void) {
         .channel = WEAPON_LEDC_CHANNEL,
         .timer_sel = WEAPON_LEDC_TIMER,
         .gpio_num = WEAPON_PWM_GPIO,
-        .duty = 0,
-        .hpoint = 0,
+        .duty = 0,   // start with ESC idle
+        .hpoint = 0, // phase offset, 0 means pulse starts at timer reset
     };
     ESP_ERROR_CHECK(ledc_channel_config(&ledc_ch));
 
+    // ADC for battery voltage measurement via resistor divider
     adc_oneshot_unit_init_cfg_t adc_cfg = {
         .unit_id = ADC_UNIT_1,
-        .ulp_mode = ADC_ULP_MODE_DISABLE,
+        .ulp_mode = ADC_ULP_MODE_DISABLE, // no ultra-low-power coprocessor usage
     };
     ESP_ERROR_CHECK(adc_oneshot_new_unit(&adc_cfg, &s_adc_handle));
 
     adc_oneshot_chan_cfg_t chan_cfg = {
-        .atten = ADC_ATTEN_DB_12,
+        .atten = ADC_ATTEN_DB_12, // 12dB attenuation, full-scale ~3.1V input range
         .bitwidth = ADC_BITWIDTH_DEFAULT,
     };
     ESP_ERROR_CHECK(adc_oneshot_config_channel(s_adc_handle, ADC_CHANNEL_1, &chan_cfg));
 
+    // Curve fitting calibration compensates for ADC nonlinearity, outputs mV
     adc_cali_curve_fitting_config_t cali_cfg = {
         .unit_id = ADC_UNIT_1,
         .chan = ADC_CHANNEL_1,
@@ -151,22 +165,14 @@ void control_set_enabled(bool enabled) {
     gpio_set_level(MOTOR_ENABLE_GPIO, enabled ? 1 : 0);
 }
 
-/*
- * Inverse kinematics: robot velocity (vx, vy, omega) -> wheel speeds (u0, u1, u2)
- *
- * u_i = -sin(phi_i) * vx + cos(phi_i) * vy + R * omega
- *
- * Wheel positions (phi_i measured CCW from forward +x axis):
- *   Motor 1 (rear):        phi_0 = 180°
- *   Motor 2 (front-right): phi_1 = -60°
- *   Motor 3 (front-left):  phi_2 =  60°
- *
- * | u0 |   |  0           -1     R | | vx    |
- * | u1 | = |  sqrt(3)/2    1/2   R | | vy    |
- * | u2 |   | -sqrt(3)/2    1/2   R | | omega |
- *
- * When flipped: negate vx, vy, omega (all motor directions reverse).
- */
+// 3-omni-wheel inverse kinematics: (vx, vy, omega) -> wheel speeds
+// u_i = -sin(phi_i)*vx + cos(phi_i)*vy + R*omega
+//
+// Motor 1 (rear):        phi=180°  ->  u0 =              -vy + R*w
+// Motor 2 (front-right): phi=-60°  ->  u1 =  sqrt3/2*vx + vy/2 + R*w
+// Motor 3 (front-left):  phi=60°   ->  u2 = -sqrt3/2*vx + vy/2 + R*w
+//
+// When flipped: negate all inputs
 void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty, bool is_flipped) {
     float vx = twist->linear.x;
     float vy = twist->linear.y;
@@ -183,6 +189,7 @@ void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty,
     u[1] = SQRT3_2 * vx + 0.5f * vy + ROBOT_RADIUS_M * omega;
     u[2] = -SQRT3_2 * vx + 0.5f * vy + ROBOT_RADIUS_M * omega;
 
+    // Normalize so no wheel exceeds max speed
     float max_u = fmaxf(fmaxf(fabsf(u[0]), fabsf(u[1])), fabsf(u[2]));
     if (max_u > 1.0f) {
         float scale = 1.0f / max_u;
@@ -191,9 +198,12 @@ void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty,
         u[2] *= scale;
     }
 
+    // TODO: add per-motor PID speed control to normalize wheel speeds
+
     for (int i = 0; i < NUM_MOTORS; i++)
         set_motor(i, u[i]);
 
+    // Map weapon_duty (0-255) to ESC pulse range
     uint32_t pulse_min = WEAPON_US_TO_TICKS(s_weapon_pulse_min_us);
     uint32_t pulse_max = WEAPON_US_TO_TICKS(s_weapon_pulse_max_us);
     uint32_t wpn = pulse_min + (weapon_duty * (pulse_max - pulse_min)) / 255;

@@ -54,6 +54,7 @@
 #endif
 #define TIME_SYNC_TIMEOUT_MS 1000
 
+// 4 subscriptions + 1 service + parameter server handles
 #define EXECUTOR_HANDLES (RCLC_EXECUTOR_PARAMETER_SERVER_HANDLES + 5)
 
 #define RCCHECK(fn)                                                                                                                                                                                                        \
@@ -108,8 +109,9 @@ static char s_cal_msg_buf[48];
 static ros_queues_t *s_queues;
 
 #ifdef CONFIG_PERCEPTRON_ROSLOG
-// --- Log hook: forwards ESP_LOG messages with our TAG to ROS ---
 
+// Custom vprintf hook: intercepts ESP_LOG output, queues messages
+// matching our TAG for publishing to the roslog ROS topic
 static int ros_log_vprintf(const char *fmt, va_list args) {
     if (!s_connected || s_draining)
         return s_orig_vprintf(fmt, args);
@@ -120,9 +122,10 @@ static int ros_log_vprintf(const char *fmt, va_list args) {
     vsnprintf(buf, sizeof(buf), fmt, args_copy);
     va_end(args_copy);
 
+    // Extract message after "PERCEPTRON: " if present
     char *tag_pos = strstr(buf, TAG ": ");
     if (tag_pos) {
-        char *msg = tag_pos + sizeof(TAG) + 1; // skip "TAG: "
+        char *msg = tag_pos + sizeof(TAG) + 1;
         size_t len = strlen(msg);
         if (len > 0 && msg[len - 1] == '\n')
             msg[len - 1] = '\0';
@@ -147,8 +150,6 @@ static void log_drain(void) {
 }
 #endif
 
-// --- Time sync ---
-
 bool ros_node_time_sync(void) {
     if (rmw_uros_sync_session(TIME_SYNC_TIMEOUT_MS) != RMW_RET_OK)
         return false;
@@ -172,8 +173,7 @@ bool ros_node_time_synced(void) { return s_time_synced; }
 
 int64_t ros_node_last_sync_time(void) { return s_last_sync; }
 
-// --- ROS callbacks ---
-
+// ROS callbacks forward messages to queues consumed by controller_task
 static void cb_cmd_vel(const void *msg) { xQueueOverwrite(s_queues->cmd_vel, msg); }
 static void cb_weapon(const void *msg) { xQueueOverwrite(s_queues->weapon, msg); }
 static void cb_flipped(const void *msg) { xQueueOverwrite(s_queues->flipped, msg); }
@@ -188,8 +188,6 @@ static void cb_calibrate(const void *req, void *res) {
     strncpy(r->message.data, m, r->message.capacity - 1);
     r->message.size = strlen(r->message.data);
 }
-
-// --- NVS helpers ---
 
 static bool nvs_load_bool(const char *key, bool default_val) {
     nvs_handle_t h;
@@ -231,8 +229,6 @@ static void nvs_save_i32(const char *key, int32_t val) {
     }
 }
 
-// --- Parameter callback ---
-
 static const char *s_motor_param_names[] = {
     PARAM_MOTOR1_REVERSED,
     PARAM_MOTOR2_REVERSED,
@@ -244,9 +240,9 @@ static bool on_param_changed(const Parameter *old_p, const Parameter *new_p, voi
     if (!old_p && !new_p)
         return false;
     if (!old_p)
-        return true;
+        return true;  // allow new parameter creation
     if (!new_p)
-        return false;
+        return false; // reject parameter deletion
     if (new_p->value.type == RCLC_PARAMETER_BOOL) {
         for (int i = 0; i < 3; i++) {
             if (strcmp(new_p->name.data, s_motor_param_names[i]) == 0) {
@@ -279,8 +275,6 @@ static bool on_param_changed(const Parameter *old_p, const Parameter *new_p, voi
     }
     return false;
 }
-
-// --- Public API ---
 
 bool ros_node_init(ros_queues_t *queues) {
     s_queues = queues;

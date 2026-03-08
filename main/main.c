@@ -54,6 +54,7 @@ static void controller_task(void *arg) {
         if (xQueueReceive(s_queues.cmd_vel, &twist, 0) == pdTRUE)
             last_cmd_vel_time = esp_timer_get_time();
 
+        // We stop motors if no cmd_vel received recently
         bool cmd_vel_timed_out = (esp_timer_get_time() - last_cmd_vel_time) > (CMD_VEL_TIMEOUT_MS * 1000LL);
 
         xQueuePeek(s_queues.weapon, &weapon, 0);
@@ -120,6 +121,7 @@ static void controller_task(void *arg) {
             }
 
             if (!estop_active) {
+                // Delay weapon arming after estop release for safety
                 bool weapon_armed = (esp_timer_get_time() - estop_release_time) > (WEAPON_ARM_DELAY_MS * 1000LL);
                 uint8_t wpn = weapon_armed ? weapon.data : 0;
                 if (cmd_vel_timed_out)
