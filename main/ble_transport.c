@@ -1,5 +1,6 @@
 #include "include/ble_transport.h"
 
+#include <esp_bt.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/stream_buffer.h>
@@ -223,6 +224,10 @@ bool microros_ble_init(ble_transport_ctx_t *ctx) {
         g_rx_stream = NULL;
         return false;
     }
+
+    // Default TX power is only +3 dBm, max out for better range
+    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P20);
+    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_P20);
 
     ble_svc_gap_device_name_set(CONFIG_PERCEPTRON_BLE_DEVICE_NAME);
     nimble_port_freertos_init(ble_task);
