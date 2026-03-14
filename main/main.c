@@ -12,26 +12,21 @@
 #include <std_msgs/msg/u_int8.h>
 
 #include "include/ble_transport.h"
+#include "include/am32.h"
 #include "include/control.h"
 #include "include/ros_node.h"
 #include "include/status_led.h"
 
 #define TAG "PERCEPTRON"
 
-#define CONTROLLER_PERIOD_MS 10
-#define CMD_VEL_TIMEOUT_MS 500
-#define WEAPON_ARM_DELAY_MS 3000
-#define BATTERY_PUB_PERIOD_MS 5000
-#define TIME_RESYNC_PERIOD_MS 30000
-#define CAL_POWER_OFF_MS 2000
-#define CAL_MAX_HOLD_MS 5000
-#define CAL_MIN_HOLD_MS 5000
-
+#define CONTROLLER_PERIOD_MS CONFIG_PERCEPTRON_CONTROLLER_PERIOD_MS
+#define CMD_VEL_TIMEOUT_MS CONFIG_PERCEPTRON_CMD_VEL_TIMEOUT_MS
+#define WEAPON_ARM_DELAY_MS CONFIG_PERCEPTRON_WEAPON_ARM_DELAY_MS
+#define BATTERY_PUB_PERIOD_MS CONFIG_PERCEPTRON_BATTERY_PUB_PERIOD_MS
+#define TIME_RESYNC_PERIOD_MS CONFIG_PERCEPTRON_TIME_RESYNC_PERIOD_MS
 typedef enum {
     CAL_IDLE = 0,
-    CAL_POWER_OFF,
-    CAL_POWER_ON_MAX,
-    CAL_SEND_MIN,
+    CAL_AM32_START,
 } cal_state_t;
 
 static ble_transport_ctx_t s_ble;
@@ -48,7 +43,6 @@ static void controller_task(void *arg) {
     int64_t estop_release_time = 0;
     int64_t last_cmd_vel_time = 0;
     cal_state_t cal_state = CAL_IDLE;
-    int64_t cal_timer = 0;
 
     while (true) {
         if (xQueueReceive(s_queues.cmd_vel, &twist, 0) == pdTRUE)
@@ -62,43 +56,31 @@ static void controller_task(void *arg) {
 
         bool cal_req;
         if (cal_state == CAL_IDLE && xQueueReceive(s_queues.calibrate, &cal_req, 0) == pdTRUE) {
-            cal_state = CAL_POWER_OFF;
-            cal_timer = esp_timer_get_time();
+            cal_state = CAL_AM32_START;
             control_set_enabled(false);
-            ESP_LOGI(TAG, "ESC cal: power off, sending max");
+            ESP_LOGI(TAG, "AM32 ESC config: starting");
         }
 
         if (cal_state != CAL_IDLE) {
-            int64_t elapsed = esp_timer_get_time() - cal_timer;
-
             switch (cal_state) {
-            case CAL_POWER_OFF:
-                control_update(&zero_twist, 255, false);
-                if (elapsed > CAL_POWER_OFF_MS * 1000LL) {
-                    cal_state = CAL_POWER_ON_MAX;
-                    cal_timer = esp_timer_get_time();
-                    control_set_enabled(true);
-                    ESP_LOGI(TAG, "ESC cal: power on (max throttle)");
-                }
+            case CAL_AM32_START: {
+                vTaskDelay(pdMS_TO_TICKS(500));
+                control_weapon_ledc_deinit();
+
+                am32_settings_t s = am32_get_desired_settings();
+                esp_err_t err = am32_configure(&s);
+
+                control_weapon_ledc_init();
+                control_set_enabled(false);
+                estop_active = true;
+                status_led_set(LED_STATUS_ESTOP);
+                cal_state = CAL_IDLE;
+                if (err == ESP_OK)
+                    ESP_LOGI(TAG, "AM32 ESC config: OK");
+                else
+                    ESP_LOGE(TAG, "AM32 ESC config: FAILED (%s)", esp_err_to_name(err));
                 break;
-            case CAL_POWER_ON_MAX:
-                control_update(&zero_twist, 255, false);
-                if (elapsed > CAL_MAX_HOLD_MS * 1000LL) {
-                    cal_state = CAL_SEND_MIN;
-                    cal_timer = esp_timer_get_time();
-                    ESP_LOGI(TAG, "ESC cal: sending min throttle");
-                }
-                break;
-            case CAL_SEND_MIN:
-                control_update(&zero_twist, 0, false);
-                if (elapsed > CAL_MIN_HOLD_MS * 1000LL) {
-                    cal_state = CAL_IDLE;
-                    control_set_enabled(false);
-                    estop_active = true;
-                    status_led_set(LED_STATUS_ESTOP);
-                    ESP_LOGI(TAG, "ESC cal: done");
-                }
-                break;
+            }
             default:
                 break;
             }
@@ -170,7 +152,6 @@ static void microros_task(void *arg) {
         vTaskDelay(pdMS_TO_TICKS(500));
     }
 
-    ros_node_set_connected(true);
     status_led_set(LED_STATUS_ESTOP);
     ESP_LOGI(TAG, "Connected, waiting for estop release");
 
@@ -179,8 +160,6 @@ static void microros_task(void *arg) {
     while (true) {
         if (!s_ble.connected) {
             ESP_LOGI(TAG, "BLE disconnected, restarting");
-            ros_node_log_drain();
-            ros_node_set_connected(false);
             control_set_enabled(false);
             status_led_set(LED_STATUS_ERROR);
             vTaskDelay(pdMS_TO_TICKS(500));

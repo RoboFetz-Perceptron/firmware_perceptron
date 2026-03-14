@@ -21,6 +21,7 @@ static mcpwm_cmpr_handle_t s_comparators[NUM_MOTORS];
 static mcpwm_gen_handle_t s_gen_in1[NUM_MOTORS];
 static mcpwm_gen_handle_t s_gen_in2[NUM_MOTORS];
 static bool s_motor_reversed[NUM_MOTORS] = {false, false, false};
+static int s_motor_speed_pct[NUM_MOTORS] = {100, 100, 100};
 static uint32_t s_weapon_pulse_min_us = WEAPON_PULSE_MIN_US_DEFAULT;
 static uint32_t s_weapon_pulse_max_us = WEAPON_PULSE_MAX_US_DEFAULT;
 
@@ -34,6 +35,7 @@ static void set_motor(int idx, float speed) {
     float clamped = fmaxf(-1.0f, fminf(1.0f, speed));
     if (s_motor_reversed[idx])
         clamped = -clamped;
+    clamped = clamped * s_motor_speed_pct[idx] / 100;
     uint32_t duty = (uint32_t)(fabsf(clamped) * PERIOD_TICKS);
 
     mcpwm_comparator_set_compare_value(s_comparators[idx], duty);
@@ -49,6 +51,32 @@ static void set_motor(int idx, float speed) {
         mcpwm_generator_set_force_level(s_gen_in1[idx], 0, true); // brake
         mcpwm_generator_set_force_level(s_gen_in2[idx], 0, true);
     }
+}
+
+void control_weapon_ledc_init(void) {
+    ledc_timer_config_t ledc_timer = {
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .timer_num = WEAPON_LEDC_TIMER,
+        .duty_resolution = WEAPON_LEDC_RESOLUTION,
+        .freq_hz = WEAPON_LEDC_FREQ_HZ,
+        .clk_cfg = LEDC_AUTO_CLK,
+    };
+    ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
+
+    ledc_channel_config_t ledc_ch = {
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .channel = WEAPON_LEDC_CHANNEL,
+        .timer_sel = WEAPON_LEDC_TIMER,
+        .gpio_num = WEAPON_PWM_GPIO,
+        .duty = 0,
+        .hpoint = 0,
+    };
+    ESP_ERROR_CHECK(ledc_channel_config(&ledc_ch));
+}
+
+void control_weapon_ledc_deinit(void) {
+    ledc_stop(LEDC_LOW_SPEED_MODE, WEAPON_LEDC_CHANNEL, 0);
+    gpio_reset_pin(WEAPON_PWM_GPIO);
 }
 
 esp_err_t control_init(void) {
@@ -109,25 +137,7 @@ esp_err_t control_init(void) {
         ESP_ERROR_CHECK(mcpwm_timer_start_stop(s_timers[i], MCPWM_TIMER_START_NO_STOP));
     }
 
-    // LEDC for weapon ESC, 50Hz RC servo PWM with 14-bit resolution (16384 ticks per 20ms)
-    ledc_timer_config_t ledc_timer = {
-        .speed_mode = LEDC_LOW_SPEED_MODE, // ESP32-C6 only has low-speed LEDC channels
-        .timer_num = WEAPON_LEDC_TIMER,
-        .duty_resolution = WEAPON_LEDC_RESOLUTION, // 14-bit = ~1.2us per tick at 50Hz
-        .freq_hz = WEAPON_LEDC_FREQ_HZ,            // 50Hz standard RC PWM frequency
-        .clk_cfg = LEDC_AUTO_CLK,
-    };
-    ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
-
-    ledc_channel_config_t ledc_ch = {
-        .speed_mode = LEDC_LOW_SPEED_MODE,
-        .channel = WEAPON_LEDC_CHANNEL,
-        .timer_sel = WEAPON_LEDC_TIMER,
-        .gpio_num = WEAPON_PWM_GPIO,
-        .duty = 0,   // start with ESC idle
-        .hpoint = 0, // phase offset, 0 means pulse starts at timer reset
-    };
-    ESP_ERROR_CHECK(ledc_channel_config(&ledc_ch));
+    control_weapon_ledc_init();
 
     // ADC for battery voltage measurement via resistor divider
     adc_oneshot_unit_init_cfg_t adc_cfg = {
@@ -203,10 +213,16 @@ void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty,
     for (int i = 0; i < NUM_MOTORS; i++)
         set_motor(i, u[i]);
 
-    // Map weapon_duty (0-255) to ESC pulse range
-    uint32_t pulse_min = WEAPON_US_TO_TICKS(s_weapon_pulse_min_us);
-    uint32_t pulse_max = WEAPON_US_TO_TICKS(s_weapon_pulse_max_us);
-    uint32_t wpn = pulse_min + (weapon_duty * (pulse_max - pulse_min)) / 255;
+    // Bidirectional ESC: 1500µs=stop, 1500-2000µs=forward, 1500-1000µs=reverse
+    uint32_t center = WEAPON_US_TO_TICKS(1500);
+    uint32_t wpn;
+    if (is_flipped) {
+        uint32_t end = WEAPON_US_TO_TICKS(s_weapon_pulse_min_us);
+        wpn = center - (weapon_duty * (center - end)) / 255;
+    } else {
+        uint32_t end = WEAPON_US_TO_TICKS(s_weapon_pulse_max_us);
+        wpn = center + (weapon_duty * (end - center)) / 255;
+    }
     ledc_set_duty(LEDC_LOW_SPEED_MODE, WEAPON_LEDC_CHANNEL, wpn);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, WEAPON_LEDC_CHANNEL);
 
@@ -216,6 +232,11 @@ void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty,
 void control_set_reversed(int motor_idx, bool reversed) {
     if (motor_idx >= 0 && motor_idx < NUM_MOTORS)
         s_motor_reversed[motor_idx] = reversed;
+}
+
+void control_set_speed_pct(int motor_idx, int pct) {
+    if (motor_idx >= 0 && motor_idx < NUM_MOTORS)
+        s_motor_speed_pct[motor_idx] = pct < 0 ? 0 : (pct > 100 ? 100 : pct);
 }
 
 void control_set_weapon_pulse_range(uint32_t min_us, uint32_t max_us) {

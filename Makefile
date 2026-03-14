@@ -1,4 +1,4 @@
-PORT   ?= /dev/ttyUSB0
+PORT   ?= /dev/ttyACM0
 BAUD   ?= 460800
 
 .PHONY: build flash monitor flash-monitor clean fullclean menuconfig

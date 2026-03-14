@@ -1,10 +1,7 @@
 #include "include/ros_node.h"
+#include "include/am32.h"
 #include "include/control.h"
 
-#ifdef CONFIG_PERCEPTRON_ROSLOG
-#include <stdarg.h>
-#include <stdio.h>
-#endif
 #include <string.h>
 #include <sys/time.h>
 
@@ -22,9 +19,6 @@
 #include <std_msgs/msg/bool.h>
 #include <std_msgs/msg/float32.h>
 #include <std_msgs/msg/u_int8.h>
-#ifdef CONFIG_PERCEPTRON_ROSLOG
-#include <std_msgs/msg/string.h>
-#endif
 #include <std_srvs/srv/trigger.h>
 
 #define TAG "PERCEPTRON"
@@ -36,22 +30,22 @@
 #define TOPIC_FLIPPED "is_flipped"
 #define TOPIC_ESTOP "estop"
 #define TOPIC_BATTERY "battery_voltage"
-#ifdef CONFIG_PERCEPTRON_ROSLOG
-#define TOPIC_ROSLOG "roslog"
-#endif
 #define SRV_CALIBRATE "calibrate_esc"
 
 #define PARAM_MOTOR1_REVERSED "motor1_reversed"
 #define PARAM_MOTOR2_REVERSED "motor2_reversed"
 #define PARAM_MOTOR3_REVERSED "motor3_reversed"
+#define PARAM_MOTOR1_SPEED_PCT "motor1_speed_pct"
+#define PARAM_MOTOR2_SPEED_PCT "motor2_speed_pct"
+#define PARAM_MOTOR3_SPEED_PCT "motor3_speed_pct"
 #define PARAM_WPN_PULSE_MIN "wpn_pulse_min"
 #define PARAM_WPN_PULSE_MAX "wpn_pulse_max"
+#define PARAM_AM32_DIR_REVERSED "am32_dir_reversed"
+#define PARAM_AM32_BIDIRECTIONAL "am32_bidirectional"
+#define PARAM_AM32_BRAKE "am32_brake_on_stop"
 #define NVS_NAMESPACE "perceptron"
 
 #define SPIN_TIMEOUT_MS 100
-#ifdef CONFIG_PERCEPTRON_ROSLOG
-#define LOG_MSG_MAX_LEN 192
-#endif
 #define TIME_SYNC_TIMEOUT_MS 1000
 
 // 4 subscriptions + 1 service + parameter server handles
@@ -66,27 +60,14 @@
         }                                                                                                                                                                                                                  \
     } while (0)
 
-static bool s_connected;
 static bool s_time_synced;
 static int64_t s_last_sync;
-
-#ifdef CONFIG_PERCEPTRON_ROSLOG
-static QueueHandle_t s_q_log;
-static vprintf_like_t s_orig_vprintf;
-static bool s_draining;
-#endif
 
 static rcl_allocator_t s_alloc;
 static rclc_support_t s_support;
 static rcl_node_t s_node;
 static rclc_executor_t s_exec;
 static rclc_parameter_server_t s_params;
-
-#ifdef CONFIG_PERCEPTRON_ROSLOG
-static rcl_publisher_t s_pub_log;
-static std_msgs__msg__String s_msg_log;
-static char s_log_pub_buf[LOG_MSG_MAX_LEN];
-#endif
 
 static rcl_publisher_t s_pub_battery;
 static std_msgs__msg__Float32 s_msg_battery;
@@ -107,48 +88,6 @@ static std_srvs__srv__Trigger_Response s_res_calibrate;
 static char s_cal_msg_buf[48];
 
 static ros_queues_t *s_queues;
-
-#ifdef CONFIG_PERCEPTRON_ROSLOG
-
-// Custom vprintf hook: intercepts ESP_LOG output, queues messages
-// matching our TAG for publishing to the roslog ROS topic
-static int ros_log_vprintf(const char *fmt, va_list args) {
-    if (!s_connected || s_draining)
-        return s_orig_vprintf(fmt, args);
-
-    char buf[LOG_MSG_MAX_LEN];
-    va_list args_copy;
-    va_copy(args_copy, args);
-    vsnprintf(buf, sizeof(buf), fmt, args_copy);
-    va_end(args_copy);
-
-    // Extract message after "PERCEPTRON: " if present
-    char *tag_pos = strstr(buf, TAG ": ");
-    if (tag_pos) {
-        char *msg = tag_pos + sizeof(TAG) + 1;
-        size_t len = strlen(msg);
-        if (len > 0 && msg[len - 1] == '\n')
-            msg[len - 1] = '\0';
-        char q_buf[LOG_MSG_MAX_LEN];
-        strncpy(q_buf, msg, sizeof(q_buf) - 1);
-        q_buf[sizeof(q_buf) - 1] = '\0';
-        xQueueSendToBack(s_q_log, q_buf, 0);
-    }
-
-    return s_orig_vprintf(fmt, args);
-}
-
-static void log_drain(void) {
-    s_draining = true;
-    char buf[LOG_MSG_MAX_LEN];
-    while (xQueueReceive(s_q_log, buf, 0) == pdTRUE) {
-        s_msg_log.data.size = strlen(buf);
-        memcpy(s_log_pub_buf, buf, s_msg_log.data.size + 1);
-        rcl_ret_t rc __attribute__((unused)) = rcl_publish(&s_pub_log, &s_msg_log, NULL);
-    }
-    s_draining = false;
-}
-#endif
 
 bool ros_node_time_sync(void) {
     if (rmw_uros_sync_session(TIME_SYNC_TIMEOUT_MS) != RMW_RET_OK)
@@ -235,6 +174,12 @@ static const char *s_motor_param_names[] = {
     PARAM_MOTOR3_REVERSED,
 };
 
+static const char *s_motor_speed_pct_names[] = {
+    PARAM_MOTOR1_SPEED_PCT,
+    PARAM_MOTOR2_SPEED_PCT,
+    PARAM_MOTOR3_SPEED_PCT,
+};
+
 static bool on_param_changed(const Parameter *old_p, const Parameter *new_p, void *ctx) {
     (void)ctx;
     if (!old_p && !new_p)
@@ -249,6 +194,19 @@ static bool on_param_changed(const Parameter *old_p, const Parameter *new_p, voi
                 control_set_reversed(i, new_p->value.bool_value);
                 nvs_save_bool(s_motor_param_names[i], new_p->value.bool_value);
                 ESP_LOGI(TAG, "M%d reversed=%d", i + 1, new_p->value.bool_value);
+                return true;
+            }
+        }
+    }
+    if (new_p->value.type == RCLC_PARAMETER_INT) {
+        for (int i = 0; i < 3; i++) {
+            if (strcmp(new_p->name.data, s_motor_speed_pct_names[i]) == 0) {
+                int pct = (int)new_p->value.integer_value;
+                if (pct < 0 || pct > 100)
+                    return false;
+                control_set_speed_pct(i, pct);
+                nvs_save_i32(s_motor_speed_pct_names[i], (int32_t)pct);
+                ESP_LOGI(TAG, "M%d speed_pct=%d", i + 1, pct);
                 return true;
             }
         }
@@ -273,18 +231,32 @@ static bool on_param_changed(const Parameter *old_p, const Parameter *new_p, voi
             return true;
         }
     }
+    if (new_p->value.type == RCLC_PARAMETER_BOOL) {
+        bool val = new_p->value.bool_value;
+        bool is_am32 = false;
+        if (strcmp(new_p->name.data, PARAM_AM32_DIR_REVERSED) == 0 || strcmp(new_p->name.data, PARAM_AM32_BIDIRECTIONAL) == 0 || strcmp(new_p->name.data, PARAM_AM32_BRAKE) == 0) {
+            is_am32 = true;
+        }
+        if (is_am32) {
+            nvs_save_bool(new_p->name.data, val);
+            // Rebuild desired settings from all three params
+            am32_settings_t s = am32_get_desired_settings();
+            if (strcmp(new_p->name.data, PARAM_AM32_DIR_REVERSED) == 0)
+                s.direction_reversed = val;
+            else if (strcmp(new_p->name.data, PARAM_AM32_BIDIRECTIONAL) == 0)
+                s.bidirectional_mode = val;
+            else
+                s.brake_on_stop = val;
+            am32_set_desired_settings(&s);
+            ESP_LOGI(TAG, "AM32 %s=%d (apply on next calibrate_esc)", new_p->name.data, val);
+            return true;
+        }
+    }
     return false;
 }
 
 bool ros_node_init(ros_queues_t *queues) {
     s_queues = queues;
-
-#ifdef CONFIG_PERCEPTRON_ROSLOG
-    s_q_log = xQueueCreate(8, LOG_MSG_MAX_LEN);
-    if (!s_q_log)
-        return false;
-    s_orig_vprintf = esp_log_set_vprintf(ros_log_vprintf);
-#endif
 
     s_alloc = rcl_get_default_allocator();
     RCCHECK(rclc_support_init(&s_support, 0, NULL, &s_alloc));
@@ -294,7 +266,7 @@ bool ros_node_init(ros_queues_t *queues) {
 
     const rclc_parameter_options_t param_opts = {
         .notify_changed_over_dds = true,
-        .max_params = 5,
+        .max_params = 11,
         .allow_undeclared_parameters = false,
         .low_mem_mode = false,
     };
@@ -311,6 +283,13 @@ bool ros_node_init(ros_queues_t *queues) {
         control_set_reversed(i, saved);
     }
 
+    for (int i = 0; i < 3; i++) {
+        int32_t pct = nvs_load_i32(s_motor_speed_pct_names[i], 100);
+        RCCHECK(rclc_add_parameter(&s_params, s_motor_speed_pct_names[i], RCLC_PARAMETER_INT));
+        RCCHECK(rclc_parameter_set_int(&s_params, s_motor_speed_pct_names[i], pct));
+        control_set_speed_pct(i, (int)pct);
+    }
+
     int32_t wpn_min = nvs_load_i32(PARAM_WPN_PULSE_MIN, WEAPON_PULSE_MIN_US_DEFAULT);
     int32_t wpn_max = nvs_load_i32(PARAM_WPN_PULSE_MAX, WEAPON_PULSE_MAX_US_DEFAULT);
     RCCHECK(rclc_add_parameter(&s_params, PARAM_WPN_PULSE_MIN, RCLC_PARAMETER_INT));
@@ -318,6 +297,24 @@ bool ros_node_init(ros_queues_t *queues) {
     RCCHECK(rclc_add_parameter(&s_params, PARAM_WPN_PULSE_MAX, RCLC_PARAMETER_INT));
     RCCHECK(rclc_parameter_set_int(&s_params, PARAM_WPN_PULSE_MAX, wpn_max));
     control_set_weapon_pulse_range((uint32_t)wpn_min, (uint32_t)wpn_max);
+
+    {
+        bool am32_dir = nvs_load_bool(PARAM_AM32_DIR_REVERSED, false);
+        bool am32_bidir = nvs_load_bool(PARAM_AM32_BIDIRECTIONAL, true);
+        bool am32_brake = nvs_load_bool(PARAM_AM32_BRAKE, true);
+        RCCHECK(rclc_add_parameter(&s_params, PARAM_AM32_DIR_REVERSED, RCLC_PARAMETER_BOOL));
+        RCCHECK(rclc_parameter_set_bool(&s_params, PARAM_AM32_DIR_REVERSED, am32_dir));
+        RCCHECK(rclc_add_parameter(&s_params, PARAM_AM32_BIDIRECTIONAL, RCLC_PARAMETER_BOOL));
+        RCCHECK(rclc_parameter_set_bool(&s_params, PARAM_AM32_BIDIRECTIONAL, am32_bidir));
+        RCCHECK(rclc_add_parameter(&s_params, PARAM_AM32_BRAKE, RCLC_PARAMETER_BOOL));
+        RCCHECK(rclc_parameter_set_bool(&s_params, PARAM_AM32_BRAKE, am32_brake));
+        am32_settings_t s = {
+            .direction_reversed = am32_dir,
+            .bidirectional_mode = am32_bidir,
+            .brake_on_stop = am32_brake,
+        };
+        am32_set_desired_settings(&s);
+    }
 
     s_sub_cmd_vel = rcl_get_zero_initialized_subscription();
     RCCHECK(rclc_subscription_init_best_effort(&s_sub_cmd_vel, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist), TOPIC_CMD_VEL));
@@ -334,14 +331,6 @@ bool ros_node_init(ros_queues_t *queues) {
     s_sub_estop = rcl_get_zero_initialized_subscription();
     RCCHECK(rclc_subscription_init_default(&s_sub_estop, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Bool), TOPIC_ESTOP));
     RCCHECK(rclc_executor_add_subscription(&s_exec, &s_sub_estop, &s_msg_estop, cb_estop, ON_NEW_DATA));
-
-#ifdef CONFIG_PERCEPTRON_ROSLOG
-    s_pub_log = rcl_get_zero_initialized_publisher();
-    RCCHECK(rclc_publisher_init_best_effort(&s_pub_log, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String), TOPIC_ROSLOG));
-    s_msg_log.data.data = s_log_pub_buf;
-    s_msg_log.data.size = 0;
-    s_msg_log.data.capacity = sizeof(s_log_pub_buf);
-#endif
 
     s_pub_battery = rcl_get_zero_initialized_publisher();
     RCCHECK(rclc_publisher_init_best_effort(&s_pub_battery, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32), TOPIC_BATTERY));
@@ -361,17 +350,6 @@ bool ros_node_init(ros_queues_t *queues) {
 
 void ros_node_spin(void) {
     rclc_executor_spin_some(&s_exec, RCL_MS_TO_NS(SPIN_TIMEOUT_MS));
-#ifdef CONFIG_PERCEPTRON_ROSLOG
-    log_drain();
-#endif
-}
-
-void ros_node_set_connected(bool connected) { s_connected = connected; }
-
-void ros_node_log_drain(void) {
-#ifdef CONFIG_PERCEPTRON_ROSLOG
-    log_drain();
-#endif
 }
 
 void ros_node_publish_battery(float voltage) {

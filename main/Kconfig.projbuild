@@ -12,12 +12,42 @@ menu "Perceptron"
         string "BLE device name"
         default "Perceptron"
 
-    config PERCEPTRON_ROSLOG
-        bool "Publish ESP_LOG to ROS topic"
-        default y
+    config PERCEPTRON_CONTROLLER_PERIOD_MS
+        int "Controller loop period (ms)"
+        default 10
+        range 1 100
         help
-            Forward ESP_LOG messages tagged PERCEPTRON to a ROS String
-            topic (roslog). Useful for debugging over ROS but adds
-            overhead. Disable for production deployments.
+            Period of the main control loop in milliseconds.
+
+    config PERCEPTRON_CMD_VEL_TIMEOUT_MS
+        int "cmd_vel timeout (ms)"
+        default 500
+        range 100 5000
+        help
+            Stop motors if no cmd_vel message is received within
+            this timeout.
+
+    config PERCEPTRON_WEAPON_ARM_DELAY_MS
+        int "Weapon arm delay after E-STOP release (ms)"
+        default 3000
+        range 0 10000
+        help
+            Safety delay before the weapon is armed after releasing
+            the E-STOP.
+
+    config PERCEPTRON_BATTERY_PUB_PERIOD_MS
+        int "Battery voltage publish period (ms)"
+        default 5000
+        range 50 60000
+        help
+            How often the battery voltage is published over ROS.
+
+    config PERCEPTRON_TIME_RESYNC_PERIOD_MS
+        int "Time resync period (ms)"
+        default 30000
+        range 5000 300000
+        help
+            How often to resynchronize the clock with the micro-ROS
+            agent.
 
 endmenu

@@ -1,5 +1,5 @@
 {
-  "name": "RC Car Firmware (ESP-IDF)",
+  "name": "Perceptron Firmware (ESP-IDF)",
   "dockerComposeFile": "docker-compose.yml",
   "service": "firmware",
   "workspaceFolder": "/workspaces/firmware",

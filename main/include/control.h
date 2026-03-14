@@ -28,8 +28,8 @@
 #define WEAPON_LEDC_FREQ_HZ 50
 #define WEAPON_LEDC_RESOLUTION LEDC_TIMER_14_BIT
 
-// ESC servo pulse defaults in microseconds (standard RC PWM)
-#define WEAPON_PULSE_MIN_US_DEFAULT 850
+// ESC servo pulse defaults in microseconds (bidirectional: 1000-2000µs)
+#define WEAPON_PULSE_MIN_US_DEFAULT 1000
 #define WEAPON_PULSE_MAX_US_DEFAULT 2000
 // Convert microseconds to LEDC ticks (ceiling to never undershoot)
 #define WEAPON_PERIOD_US (1000000 / WEAPON_LEDC_FREQ_HZ)
@@ -40,8 +40,11 @@
 esp_err_t control_init(void);
 void control_set_enabled(bool enabled);
 void control_set_reversed(int motor_idx, bool reversed);
+void control_set_speed_pct(int motor_idx, int pct);
 void control_set_weapon_pulse_range(uint32_t min_us, uint32_t max_us);
 void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty, bool is_flipped);
 float control_read_battery_voltage(void);
+void control_weapon_ledc_deinit(void);
+void control_weapon_ledc_init(void);
 
 #endif
