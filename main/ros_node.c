@@ -37,11 +37,9 @@
 #define PARAM_MOTOR3_REVERSED "motor3_reversed"
 #define PARAM_PID_KP "pid_kp_x1000"
 #define PARAM_PID_KI "pid_ki_x1000"
-#define PARAM_WPN_PULSE_MIN "wpn_pulse_min"
-#define PARAM_WPN_PULSE_MAX "wpn_pulse_max"
-#define PARAM_AM32_DIR_REVERSED "am32_dir_reversed"
-#define PARAM_AM32_BIDIRECTIONAL "am32_bidirectional"
-#define PARAM_AM32_BRAKE "am32_brake_on_stop"
+#define PARAM_MOTOR1_MAX_HZ "motor1_max_hz"
+#define PARAM_MOTOR2_MAX_HZ "motor2_max_hz"
+#define PARAM_MOTOR3_MAX_HZ "motor3_max_hz"
 #define NVS_NAMESPACE "perceptron"
 
 #define SPIN_TIMEOUT_MS 100
@@ -168,10 +166,16 @@ static void nvs_save_i32(const char *key, int32_t val) {
     }
 }
 
-static const char *s_motor_param_names[] = {
+static const char *s_motor_reversed_names[] = {
     PARAM_MOTOR1_REVERSED,
     PARAM_MOTOR2_REVERSED,
     PARAM_MOTOR3_REVERSED,
+};
+
+static const char *s_motor_max_hz_names[] = {
+    PARAM_MOTOR1_MAX_HZ,
+    PARAM_MOTOR2_MAX_HZ,
+    PARAM_MOTOR3_MAX_HZ,
 };
 
 static bool on_param_changed(const Parameter *old_p, const Parameter *new_p, void *ctx) {
@@ -182,75 +186,52 @@ static bool on_param_changed(const Parameter *old_p, const Parameter *new_p, voi
         return true;  // allow new parameter creation
     if (!new_p)
         return false; // reject parameter deletion
+
     if (new_p->value.type == RCLC_PARAMETER_BOOL) {
-        for (int i = 0; i < 3; i++) {
-            if (strcmp(new_p->name.data, s_motor_param_names[i]) == 0) {
+        for (int i = 0; i < NUM_MOTORS; i++) {
+            if (strcmp(new_p->name.data, s_motor_reversed_names[i]) == 0) {
                 control_set_reversed(i, new_p->value.bool_value);
-                nvs_save_bool(s_motor_param_names[i], new_p->value.bool_value);
+                nvs_save_bool(s_motor_reversed_names[i], new_p->value.bool_value);
                 ESP_LOGI(TAG, "M%d reversed=%d", i + 1, new_p->value.bool_value);
                 return true;
             }
         }
     }
+
     if (new_p->value.type == RCLC_PARAMETER_INT) {
-        bool is_kp = strcmp(new_p->name.data, PARAM_PID_KP) == 0;
-        bool is_ki = strcmp(new_p->name.data, PARAM_PID_KI) == 0;
+        int64_t val = new_p->value.integer_value;
+        const char *name = new_p->name.data;
+
+#if CONFIG_PERCEPTRON_PID_ENABLED
+        bool is_kp = strcmp(name, PARAM_PID_KP) == 0;
+        bool is_ki = strcmp(name, PARAM_PID_KI) == 0;
         if (is_kp || is_ki) {
-            int64_t val = new_p->value.integer_value;
             if (val < 0 || val > 500000)
                 return false;
-            nvs_save_i32(new_p->name.data, (int32_t)val);
+            nvs_save_i32(name, (int32_t)val);
             int64_t kp_val, ki_val;
             rclc_parameter_get_int(&s_params, PARAM_PID_KP, &kp_val);
             rclc_parameter_get_int(&s_params, PARAM_PID_KI, &ki_val);
             if (is_kp) kp_val = val;
             if (is_ki) ki_val = val;
             control_set_pid_gains(kp_val / 1000.0f, ki_val / 1000.0f);
-            ESP_LOGI(TAG, "PID %s=%d (%.3f)", new_p->name.data, (int)val, val / 1000.0f);
+            ESP_LOGI(TAG, "PID %s=%d (%.3f)", name, (int)val, val / 1000.0f);
             return true;
         }
-    }
-    if (new_p->value.type == RCLC_PARAMETER_INT) {
-        int64_t val = new_p->value.integer_value;
-        bool is_min = strcmp(new_p->name.data, PARAM_WPN_PULSE_MIN) == 0;
-        bool is_max = strcmp(new_p->name.data, PARAM_WPN_PULSE_MAX) == 0;
-        if (is_min || is_max) {
-            if (val < 500 || val > 3000)
-                return false;
-            nvs_save_i32(new_p->name.data, (int32_t)val);
-            int64_t other;
-            if (is_min) {
-                rclc_parameter_get_int(&s_params, PARAM_WPN_PULSE_MAX, &other);
-                control_set_weapon_pulse_range((uint32_t)val, (uint32_t)other);
-            } else {
-                rclc_parameter_get_int(&s_params, PARAM_WPN_PULSE_MIN, &other);
-                control_set_weapon_pulse_range((uint32_t)other, (uint32_t)val);
+#endif
+
+        for (int i = 0; i < NUM_MOTORS; i++) {
+            if (strcmp(name, s_motor_max_hz_names[i]) == 0) {
+                if (val < 1 || val > 1000)
+                    return false;
+                nvs_save_i32(name, (int32_t)val);
+                control_set_max_motor_hz(i, (uint32_t)val);
+                ESP_LOGI(TAG, "M%d max_hz=%d", i + 1, (int)val);
+                return true;
             }
-            ESP_LOGI(TAG, "Weapon pulse %s=%d", new_p->name.data, (int)val);
-            return true;
         }
     }
-    if (new_p->value.type == RCLC_PARAMETER_BOOL) {
-        bool val = new_p->value.bool_value;
-        bool is_am32 = false;
-        if (strcmp(new_p->name.data, PARAM_AM32_DIR_REVERSED) == 0 || strcmp(new_p->name.data, PARAM_AM32_BIDIRECTIONAL) == 0 || strcmp(new_p->name.data, PARAM_AM32_BRAKE) == 0) {
-            is_am32 = true;
-        }
-        if (is_am32) {
-            nvs_save_bool(new_p->name.data, val);
-            // Rebuild desired settings from all three params
-            am32_settings_t s = am32_get_desired_settings();
-            if (strcmp(new_p->name.data, PARAM_AM32_DIR_REVERSED) == 0)
-                s.direction_reversed = val;
-            else if (strcmp(new_p->name.data, PARAM_AM32_BIDIRECTIONAL) == 0)
-                s.bidirectional_mode = val;
-            else
-                s.brake_on_stop = val;
-            am32_set_desired_settings(&s);
-            ESP_LOGI(TAG, "AM32 %s=%d (apply on next calibrate_esc)", new_p->name.data, val);
-            return true;
-        }
-    }
+
     return false;
 }
 
@@ -275,13 +256,14 @@ bool ros_node_init(ros_queues_t *queues) {
     RCCHECK(rclc_executor_init(&s_exec, &s_support.context, EXECUTOR_HANDLES, &s_alloc));
     RCCHECK(rclc_executor_add_parameter_server(&s_exec, &s_params, on_param_changed));
 
-    for (int i = 0; i < 3; i++) {
-        bool saved = nvs_load_bool(s_motor_param_names[i], false);
-        RCCHECK(rclc_add_parameter(&s_params, s_motor_param_names[i], RCLC_PARAMETER_BOOL));
-        RCCHECK(rclc_parameter_set_bool(&s_params, s_motor_param_names[i], saved));
+    for (int i = 0; i < NUM_MOTORS; i++) {
+        bool saved = nvs_load_bool(s_motor_reversed_names[i], false);
+        RCCHECK(rclc_add_parameter(&s_params, s_motor_reversed_names[i], RCLC_PARAMETER_BOOL));
+        RCCHECK(rclc_parameter_set_bool(&s_params, s_motor_reversed_names[i], saved));
         control_set_reversed(i, saved);
     }
 
+#if CONFIG_PERCEPTRON_PID_ENABLED
     {
         int32_t kp_x1000 = nvs_load_i32(PARAM_PID_KP, 3200);  // default 3.2
         int32_t ki_x1000 = nvs_load_i32(PARAM_PID_KI, 80000);  // default 80.0
@@ -291,43 +273,41 @@ bool ros_node_init(ros_queues_t *queues) {
         RCCHECK(rclc_parameter_set_int(&s_params, PARAM_PID_KI, ki_x1000));
         control_set_pid_gains(kp_x1000 / 1000.0f, ki_x1000 / 1000.0f);
     }
+#endif
 
-    int32_t wpn_min = nvs_load_i32(PARAM_WPN_PULSE_MIN, WEAPON_PULSE_MIN_US_DEFAULT);
-    int32_t wpn_max = nvs_load_i32(PARAM_WPN_PULSE_MAX, WEAPON_PULSE_MAX_US_DEFAULT);
-    RCCHECK(rclc_add_parameter(&s_params, PARAM_WPN_PULSE_MIN, RCLC_PARAMETER_INT));
-    RCCHECK(rclc_parameter_set_int(&s_params, PARAM_WPN_PULSE_MIN, wpn_min));
-    RCCHECK(rclc_add_parameter(&s_params, PARAM_WPN_PULSE_MAX, RCLC_PARAMETER_INT));
-    RCCHECK(rclc_parameter_set_int(&s_params, PARAM_WPN_PULSE_MAX, wpn_max));
-    control_set_weapon_pulse_range((uint32_t)wpn_min, (uint32_t)wpn_max);
+    for (int i = 0; i < NUM_MOTORS; i++) {
+        int32_t hz = nvs_load_i32(s_motor_max_hz_names[i], CONFIG_PERCEPTRON_MAX_MOTOR_HZ);
+        RCCHECK(rclc_add_parameter(&s_params, s_motor_max_hz_names[i], RCLC_PARAMETER_INT));
+        RCCHECK(rclc_parameter_set_int(&s_params, s_motor_max_hz_names[i], hz));
+        control_set_max_motor_hz(i, (uint32_t)hz);
+    }
 
     {
-        bool am32_dir = nvs_load_bool(PARAM_AM32_DIR_REVERSED, false);
-#if CONFIG_PERCEPTRON_WEAPON_BIDIRECTIONAL
-        bool am32_bidir = nvs_load_bool(PARAM_AM32_BIDIRECTIONAL, true);
-#else
-        bool am32_bidir = nvs_load_bool(PARAM_AM32_BIDIRECTIONAL, false);
-#endif
-        bool am32_brake = nvs_load_bool(PARAM_AM32_BRAKE, true);
-        RCCHECK(rclc_add_parameter(&s_params, PARAM_AM32_DIR_REVERSED, RCLC_PARAMETER_BOOL));
-        RCCHECK(rclc_parameter_set_bool(&s_params, PARAM_AM32_DIR_REVERSED, am32_dir));
-        RCCHECK(rclc_add_parameter(&s_params, PARAM_AM32_BIDIRECTIONAL, RCLC_PARAMETER_BOOL));
-        RCCHECK(rclc_parameter_set_bool(&s_params, PARAM_AM32_BIDIRECTIONAL, am32_bidir));
-        RCCHECK(rclc_add_parameter(&s_params, PARAM_AM32_BRAKE, RCLC_PARAMETER_BOOL));
-        RCCHECK(rclc_parameter_set_bool(&s_params, PARAM_AM32_BRAKE, am32_brake));
         am32_settings_t s = {
-            .direction_reversed = am32_dir,
-            .bidirectional_mode = am32_bidir,
-            .brake_on_stop = am32_brake,
+            .direction_reversed = false,
+#if CONFIG_PERCEPTRON_WEAPON_BIDIRECTIONAL
+            .bidirectional_mode = true,
+#else
+            .bidirectional_mode = false,
+#endif
+            .brake_on_stop = true,
         };
         am32_set_desired_settings(&s);
     }
 
+    const rmw_qos_profile_t qos_best_effort_1 = {
+        .reliability = RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT,
+        .history = RMW_QOS_POLICY_HISTORY_KEEP_LAST,
+        .depth = 1,
+        .durability = RMW_QOS_POLICY_DURABILITY_VOLATILE,
+    };
+
     s_sub_cmd_vel = rcl_get_zero_initialized_subscription();
-    RCCHECK(rclc_subscription_init_best_effort(&s_sub_cmd_vel, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist), TOPIC_CMD_VEL));
+    RCCHECK(rclc_subscription_init(&s_sub_cmd_vel, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist), TOPIC_CMD_VEL, &qos_best_effort_1));
     RCCHECK(rclc_executor_add_subscription(&s_exec, &s_sub_cmd_vel, &s_msg_cmd_vel, cb_cmd_vel, ON_NEW_DATA));
 
     s_sub_weapon = rcl_get_zero_initialized_subscription();
-    RCCHECK(rclc_subscription_init_best_effort(&s_sub_weapon, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, UInt8), TOPIC_WEAPON));
+    RCCHECK(rclc_subscription_init(&s_sub_weapon, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, UInt8), TOPIC_WEAPON, &qos_best_effort_1));
     RCCHECK(rclc_executor_add_subscription(&s_exec, &s_sub_weapon, &s_msg_weapon, cb_weapon, ON_NEW_DATA));
 
     s_sub_flipped = rcl_get_zero_initialized_subscription();

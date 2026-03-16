@@ -17,7 +17,7 @@
 #endif
 
 #define TAG "PERCEPTRON"
-#define NUM_MOTORS 3
+
 #define SQRT3_2 0.866025403784f
 #define PERIOD_TICKS (MOTOR_MCPWM_RESOLUTION_HZ / MOTOR_MCPWM_FREQ_HZ)
 
@@ -38,6 +38,11 @@ static int64_t s_prev_time;
 static bool s_motor_reversed[NUM_MOTORS] = {false, false, false};
 static uint32_t s_weapon_pulse_min_us = WEAPON_PULSE_MIN_US_DEFAULT;
 static uint32_t s_weapon_pulse_max_us = WEAPON_PULSE_MAX_US_DEFAULT;
+static float s_max_motor_rps[NUM_MOTORS] = {
+    CONFIG_PERCEPTRON_MAX_MOTOR_HZ,
+    CONFIG_PERCEPTRON_MAX_MOTOR_HZ,
+    CONFIG_PERCEPTRON_MAX_MOTOR_HZ,
+};
 
 // ADC
 static adc_oneshot_unit_handle_t s_adc_handle;
@@ -260,8 +265,6 @@ void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty,
 
     if (is_flipped) {
         vx = -vx;
-        vy = -vy;
-        omega = -omega;
     }
 
     // Inverse kinematics -> wheel linear velocity (m/s)
@@ -269,6 +272,21 @@ void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty,
     u_ms[0] = -1.0f * vy + ROBOT_RADIUS_M * omega;
     u_ms[1] = SQRT3_2 * vx + 0.5f * vy + ROBOT_RADIUS_M * omega;
     u_ms[2] = -SQRT3_2 * vx + 0.5f * vy + ROBOT_RADIUS_M * omega;
+
+    // Clamp to per-motor max speed while preserving direction ratio
+    // Find highest utilization ratio across all motors
+    float max_ratio = 0.0f;
+    for (int i = 0; i < NUM_MOTORS; i++) {
+        float limit = s_max_motor_rps[i] * WHEEL_RADIUS_M * 2.0f * (float)M_PI;
+        float ratio = fabsf(u_ms[i]) / limit;
+        if (ratio > max_ratio)
+            max_ratio = ratio;
+    }
+    if (max_ratio > 1.0f) {
+        float scale = 1.0f / max_ratio;
+        for (int i = 0; i < NUM_MOTORS; i++)
+            u_ms[i] *= scale;
+    }
 
 #if CONFIG_PERCEPTRON_PID_ENABLED
     // Convert to wheel RPS (setpoint for PID)
@@ -309,16 +327,11 @@ void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty,
         }
     }
 #else
-    // Open-loop: normalize so no wheel exceeds max speed
-    float max_u = fmaxf(fmaxf(fabsf(u_ms[0]), fabsf(u_ms[1])), fabsf(u_ms[2]));
-    if (max_u > 1.0f) {
-        float scale = 1.0f / max_u;
-        u_ms[0] *= scale;
-        u_ms[1] *= scale;
-        u_ms[2] *= scale;
+    // Open-loop: map wheel speed to duty cycle [-1, 1] per motor
+    for (int i = 0; i < NUM_MOTORS; i++) {
+        float limit = s_max_motor_rps[i] * WHEEL_RADIUS_M * 2.0f * (float)M_PI;
+        set_motor(i, u_ms[i] / limit);
     }
-    for (int i = 0; i < NUM_MOTORS; i++)
-        set_motor(i, u_ms[i]);
 #endif
 
 #if CONFIG_PERCEPTRON_WEAPON_BIDIRECTIONAL
@@ -347,10 +360,11 @@ void control_set_reversed(int motor_idx, bool reversed) {
         s_motor_reversed[motor_idx] = reversed;
 }
 
-void control_set_weapon_pulse_range(uint32_t min_us, uint32_t max_us) {
-    s_weapon_pulse_min_us = min_us;
-    s_weapon_pulse_max_us = max_us;
+void control_set_max_motor_hz(int motor_idx, uint32_t hz) {
+    if (motor_idx >= 0 && motor_idx < NUM_MOTORS)
+        s_max_motor_rps[motor_idx] = (float)hz;
 }
+
 
 void control_set_pid_gains(float kp, float ki) {
 #if CONFIG_PERCEPTRON_PID_ENABLED

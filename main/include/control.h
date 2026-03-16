@@ -7,6 +7,8 @@
 #include <esp_err.h>
 #include <geometry_msgs/msg/twist.h>
 
+#define NUM_MOTORS 3
+
 // Motor H-bridge GPIO pins
 #define MOTOR1_IN1_GPIO 3
 #define MOTOR1_IN2_GPIO 2
@@ -58,7 +60,7 @@ void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty,
 float control_read_battery_voltage(void);
 void control_weapon_ledc_deinit(void);
 void control_weapon_ledc_init(void);
-void control_set_weapon_pulse_range(uint32_t min_us, uint32_t max_us);
+void control_set_max_motor_hz(int motor_idx, uint32_t hz);
 void control_set_reversed(int motor_idx, bool reversed);
 void control_set_pid_gains(float kp, float ki);
 void control_pid_reset(void);

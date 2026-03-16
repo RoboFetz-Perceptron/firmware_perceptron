@@ -34,9 +34,18 @@ menu "Perceptron"
         help
             Wheel radius in mm, used to convert m/s to RPS.
 
+    config PERCEPTRON_MAX_MOTOR_HZ
+        int "Default max motor speed (Hz / rev per second)"
+        default 14
+        range 1 1000
+        help
+            Default maximum motor speed in revolutions per second.
+            Used as initial value for all motors. Can be overridden
+            per motor at runtime via ROS parameters.
+
     config PERCEPTRON_PID_ENABLED
         bool "Enable PID motor speed control (requires encoders)"
-        default y
+        default n
         help
             When enabled, motors use closed-loop PID with encoder feedback.
             When disabled, cmd_vel maps directly to PWM duty (open-loop).
