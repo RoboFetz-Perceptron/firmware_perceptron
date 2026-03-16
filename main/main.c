@@ -43,8 +43,10 @@ static void controller_task(void *arg) {
     int64_t estop_release_time = 0;
     int64_t last_cmd_vel_time = 0;
     cal_state_t cal_state = CAL_IDLE;
+    TickType_t last_wake = xTaskGetTickCount();
 
     while (true) {
+        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(CONTROLLER_PERIOD_MS));
         if (xQueueReceive(s_queues.cmd_vel, &twist, 0) == pdTRUE)
             last_cmd_vel_time = esp_timer_get_time();
 
@@ -94,6 +96,7 @@ static void controller_task(void *arg) {
                 } else if (!estop.data && estop_active) {
                     xQueueReset(s_queues.weapon);
                     weapon.data = 0;
+                    control_pid_reset();
                     control_set_enabled(true);
                     estop_release_time = esp_timer_get_time();
                     status_led_set(LED_STATUS_CONNECTED);
@@ -113,7 +116,15 @@ static void controller_task(void *arg) {
             }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(CONTROLLER_PERIOD_MS));
+    }
+}
+
+static void housekeeping_task(void *arg) {
+    (void)arg;
+
+    while (true) {
+        control_update_battery_voltage();
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
 
@@ -221,6 +232,7 @@ void app_main(void) {
         return;
     }
 
-    xTaskCreate(microros_task, "microros", 16384, NULL, 5, NULL);
-    xTaskCreate(controller_task, "controller", 4096, NULL, 4, NULL);
+    xTaskCreate(controller_task, "controller", 8192, NULL, 5, NULL);
+    xTaskCreate(microros_task, "microros", 16384, NULL, 4, NULL);
+    xTaskCreate(housekeeping_task, "housekeeping", 4096, NULL, 3, NULL);
 }

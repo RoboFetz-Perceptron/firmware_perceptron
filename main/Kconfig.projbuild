@@ -14,10 +14,40 @@ menu "Perceptron"
 
     config PERCEPTRON_CONTROLLER_PERIOD_MS
         int "Controller loop period (ms)"
-        default 10
-        range 1 100
+        default 12
+        range 5 50
         help
-            Period of the main control loop in milliseconds.
+            Period of the PID control loop in milliseconds.
+            12ms = ~80Hz.
+
+    config PERCEPTRON_ROBOT_RADIUS_MM
+        int "Robot radius (mm)"
+        default 100
+        range 10 500
+        help
+            Distance from robot center to wheel contact point in mm.
+
+    config PERCEPTRON_WHEEL_RADIUS_MM
+        int "Wheel radius (mm)"
+        default 58
+        range 5 200
+        help
+            Wheel radius in mm, used to convert m/s to RPS.
+
+    config PERCEPTRON_PID_ENABLED
+        bool "Enable PID motor speed control (requires encoders)"
+        default y
+        help
+            When enabled, motors use closed-loop PID with encoder feedback.
+            When disabled, cmd_vel maps directly to PWM duty (open-loop).
+
+    config PERCEPTRON_ENCODER_CPR
+        int "Encoder counts per revolution"
+        depends on PERCEPTRON_PID_ENABLED
+        default 4200
+        range 100 65535
+        help
+            Full quadrature counts per revolution (PPR * 4).
 
     config PERCEPTRON_CMD_VEL_TIMEOUT_MS
         int "cmd_vel timeout (ms)"

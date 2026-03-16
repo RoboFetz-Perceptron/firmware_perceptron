@@ -7,12 +7,21 @@
 #include <esp_err.h>
 #include <geometry_msgs/msg/twist.h>
 
+// Motor H-bridge GPIO pins
 #define MOTOR1_IN1_GPIO 3
 #define MOTOR1_IN2_GPIO 2
 #define MOTOR2_IN1_GPIO 21
 #define MOTOR2_IN2_GPIO 22
 #define MOTOR3_IN1_GPIO 23
 #define MOTOR3_IN2_GPIO 15
+
+// Encoder GPIO pins (quadrature A/B per motor)
+#define MOTOR1_ENC_A_GPIO 20
+#define MOTOR1_ENC_B_GPIO 19
+#define MOTOR2_ENC_A_GPIO 18
+#define MOTOR2_ENC_B_GPIO 9
+#define MOTOR3_ENC_A_GPIO 5
+#define MOTOR3_ENC_B_GPIO 4
 
 #define WEAPON_PWM_GPIO 0
 #define MOTOR_ENABLE_GPIO 13
@@ -35,16 +44,24 @@
 #define WEAPON_PERIOD_US (1000000 / WEAPON_LEDC_FREQ_HZ)
 #define WEAPON_US_TO_TICKS(us) (((us) * (1 << WEAPON_LEDC_RESOLUTION) + WEAPON_PERIOD_US - 1) / WEAPON_PERIOD_US)
 
-#define ROBOT_RADIUS_M 0.1f
+// Physical constants from Kconfig (integer mm -> float m)
+#define ROBOT_RADIUS_M (CONFIG_PERCEPTRON_ROBOT_RADIUS_MM / 1000.0f)
+#define WHEEL_RADIUS_M (CONFIG_PERCEPTRON_WHEEL_RADIUS_MM / 1000.0f)
+#define ENCODER_CPR CONFIG_PERCEPTRON_ENCODER_CPR
+
+// PID output range matches nominal battery voltage
+#define PID_NOMINAL_VOLTAGE 12.0f
 
 esp_err_t control_init(void);
 void control_set_enabled(bool enabled);
-void control_set_reversed(int motor_idx, bool reversed);
-void control_set_speed_pct(int motor_idx, int pct);
-void control_set_weapon_pulse_range(uint32_t min_us, uint32_t max_us);
 void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty, bool is_flipped);
 float control_read_battery_voltage(void);
 void control_weapon_ledc_deinit(void);
 void control_weapon_ledc_init(void);
+void control_set_weapon_pulse_range(uint32_t min_us, uint32_t max_us);
+void control_set_reversed(int motor_idx, bool reversed);
+void control_set_pid_gains(float kp, float ki);
+void control_pid_reset(void);
+void control_update_battery_voltage(void);
 
 #endif

@@ -35,9 +35,8 @@
 #define PARAM_MOTOR1_REVERSED "motor1_reversed"
 #define PARAM_MOTOR2_REVERSED "motor2_reversed"
 #define PARAM_MOTOR3_REVERSED "motor3_reversed"
-#define PARAM_MOTOR1_SPEED_PCT "motor1_speed_pct"
-#define PARAM_MOTOR2_SPEED_PCT "motor2_speed_pct"
-#define PARAM_MOTOR3_SPEED_PCT "motor3_speed_pct"
+#define PARAM_PID_KP "pid_kp_x1000"
+#define PARAM_PID_KI "pid_ki_x1000"
 #define PARAM_WPN_PULSE_MIN "wpn_pulse_min"
 #define PARAM_WPN_PULSE_MAX "wpn_pulse_max"
 #define PARAM_AM32_DIR_REVERSED "am32_dir_reversed"
@@ -50,6 +49,7 @@
 
 // 4 subscriptions + 1 service + parameter server handles
 #define EXECUTOR_HANDLES (RCLC_EXECUTOR_PARAMETER_SERVER_HANDLES + 5)
+#define MAX_PARAMS 10
 
 #define RCCHECK(fn)                                                                                                                                                                                                        \
     do {                                                                                                                                                                                                                   \
@@ -174,12 +174,6 @@ static const char *s_motor_param_names[] = {
     PARAM_MOTOR3_REVERSED,
 };
 
-static const char *s_motor_speed_pct_names[] = {
-    PARAM_MOTOR1_SPEED_PCT,
-    PARAM_MOTOR2_SPEED_PCT,
-    PARAM_MOTOR3_SPEED_PCT,
-};
-
 static bool on_param_changed(const Parameter *old_p, const Parameter *new_p, void *ctx) {
     (void)ctx;
     if (!old_p && !new_p)
@@ -199,16 +193,21 @@ static bool on_param_changed(const Parameter *old_p, const Parameter *new_p, voi
         }
     }
     if (new_p->value.type == RCLC_PARAMETER_INT) {
-        for (int i = 0; i < 3; i++) {
-            if (strcmp(new_p->name.data, s_motor_speed_pct_names[i]) == 0) {
-                int pct = (int)new_p->value.integer_value;
-                if (pct < 0 || pct > 100)
-                    return false;
-                control_set_speed_pct(i, pct);
-                nvs_save_i32(s_motor_speed_pct_names[i], (int32_t)pct);
-                ESP_LOGI(TAG, "M%d speed_pct=%d", i + 1, pct);
-                return true;
-            }
+        bool is_kp = strcmp(new_p->name.data, PARAM_PID_KP) == 0;
+        bool is_ki = strcmp(new_p->name.data, PARAM_PID_KI) == 0;
+        if (is_kp || is_ki) {
+            int64_t val = new_p->value.integer_value;
+            if (val < 0 || val > 500000)
+                return false;
+            nvs_save_i32(new_p->name.data, (int32_t)val);
+            int64_t kp_val, ki_val;
+            rclc_parameter_get_int(&s_params, PARAM_PID_KP, &kp_val);
+            rclc_parameter_get_int(&s_params, PARAM_PID_KI, &ki_val);
+            if (is_kp) kp_val = val;
+            if (is_ki) ki_val = val;
+            control_set_pid_gains(kp_val / 1000.0f, ki_val / 1000.0f);
+            ESP_LOGI(TAG, "PID %s=%d (%.3f)", new_p->name.data, (int)val, val / 1000.0f);
+            return true;
         }
     }
     if (new_p->value.type == RCLC_PARAMETER_INT) {
@@ -266,7 +265,7 @@ bool ros_node_init(ros_queues_t *queues) {
 
     const rclc_parameter_options_t param_opts = {
         .notify_changed_over_dds = true,
-        .max_params = 11,
+        .max_params = MAX_PARAMS,
         .allow_undeclared_parameters = false,
         .low_mem_mode = false,
     };
@@ -283,11 +282,14 @@ bool ros_node_init(ros_queues_t *queues) {
         control_set_reversed(i, saved);
     }
 
-    for (int i = 0; i < 3; i++) {
-        int32_t pct = nvs_load_i32(s_motor_speed_pct_names[i], 100);
-        RCCHECK(rclc_add_parameter(&s_params, s_motor_speed_pct_names[i], RCLC_PARAMETER_INT));
-        RCCHECK(rclc_parameter_set_int(&s_params, s_motor_speed_pct_names[i], pct));
-        control_set_speed_pct(i, (int)pct);
+    {
+        int32_t kp_x1000 = nvs_load_i32(PARAM_PID_KP, 3200);  // default 3.2
+        int32_t ki_x1000 = nvs_load_i32(PARAM_PID_KI, 80000);  // default 80.0
+        RCCHECK(rclc_add_parameter(&s_params, PARAM_PID_KP, RCLC_PARAMETER_INT));
+        RCCHECK(rclc_parameter_set_int(&s_params, PARAM_PID_KP, kp_x1000));
+        RCCHECK(rclc_add_parameter(&s_params, PARAM_PID_KI, RCLC_PARAMETER_INT));
+        RCCHECK(rclc_parameter_set_int(&s_params, PARAM_PID_KI, ki_x1000));
+        control_set_pid_gains(kp_x1000 / 1000.0f, ki_x1000 / 1000.0f);
     }
 
     int32_t wpn_min = nvs_load_i32(PARAM_WPN_PULSE_MIN, WEAPON_PULSE_MIN_US_DEFAULT);
