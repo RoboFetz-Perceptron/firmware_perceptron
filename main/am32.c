@@ -50,7 +50,11 @@
 
 static am32_settings_t s_desired = {
     .direction_reversed = false,
+#if CONFIG_PERCEPTRON_WEAPON_BIDIRECTIONAL
     .bidirectional_mode = true,
+#else
+    .bidirectional_mode = false,
+#endif
     .brake_on_stop = true,
 };
 

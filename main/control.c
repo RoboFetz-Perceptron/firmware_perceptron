@@ -321,7 +321,8 @@ void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty,
         set_motor(i, u_ms[i]);
 #endif
 
-    // Weapon: bidirectional ESC, 1500µs=stop, scaled by weapon_duty (0-255)
+#if CONFIG_PERCEPTRON_WEAPON_BIDIRECTIONAL
+    // Bidirectional ESC: 1500µs=stop, forward/reverse around center
     uint32_t center = WEAPON_US_TO_TICKS(1500);
     uint32_t wpn;
     if (is_flipped) {
@@ -331,6 +332,12 @@ void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty,
         uint32_t end = WEAPON_US_TO_TICKS(s_weapon_pulse_max_us);
         wpn = center + (weapon_duty * (end - center)) / 255;
     }
+#else
+    // Unidirectional ESC: full range min→max for maximum speed
+    uint32_t min_ticks = WEAPON_US_TO_TICKS(s_weapon_pulse_min_us);
+    uint32_t max_ticks = WEAPON_US_TO_TICKS(s_weapon_pulse_max_us);
+    uint32_t wpn = min_ticks + (weapon_duty * (max_ticks - min_ticks)) / 255;
+#endif
     ledc_set_duty(LEDC_LOW_SPEED_MODE, WEAPON_LEDC_CHANNEL, wpn);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, WEAPON_LEDC_CHANNEL);
 }

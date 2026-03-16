@@ -57,6 +57,15 @@ menu "Perceptron"
             Stop motors if no cmd_vel message is received within
             this timeout.
 
+    config PERCEPTRON_WEAPON_BIDIRECTIONAL
+        bool "Weapon ESC bidirectional mode"
+        default y
+        help
+            When enabled, the weapon ESC runs in bidirectional mode
+            (center=stop, forward/reverse). Throttle range per direction
+            is halved. When disabled, full throttle range is used for
+            one direction (maximum speed).
+
     config PERCEPTRON_WEAPON_ARM_DELAY_MS
         int "Weapon arm delay after E-STOP release (ms)"
         default 3000

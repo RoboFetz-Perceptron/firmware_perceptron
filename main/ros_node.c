@@ -302,7 +302,11 @@ bool ros_node_init(ros_queues_t *queues) {
 
     {
         bool am32_dir = nvs_load_bool(PARAM_AM32_DIR_REVERSED, false);
+#if CONFIG_PERCEPTRON_WEAPON_BIDIRECTIONAL
         bool am32_bidir = nvs_load_bool(PARAM_AM32_BIDIRECTIONAL, true);
+#else
+        bool am32_bidir = nvs_load_bool(PARAM_AM32_BIDIRECTIONAL, false);
+#endif
         bool am32_brake = nvs_load_bool(PARAM_AM32_BRAKE, true);
         RCCHECK(rclc_add_parameter(&s_params, PARAM_AM32_DIR_REVERSED, RCLC_PARAMETER_BOOL));
         RCCHECK(rclc_parameter_set_bool(&s_params, PARAM_AM32_DIR_REVERSED, am32_dir));
