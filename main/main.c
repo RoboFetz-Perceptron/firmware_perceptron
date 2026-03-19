@@ -11,8 +11,8 @@
 #include <std_msgs/msg/bool.h>
 #include <std_msgs/msg/u_int8.h>
 
-#include "include/ble_transport.h"
 #include "include/am32.h"
+#include "include/ble_transport.h"
 #include "include/control.h"
 #include "include/ros_node.h"
 #include "include/status_led.h"
@@ -115,7 +115,6 @@ static void controller_task(void *arg) {
                     control_update(&twist, wpn, flipped.data);
             }
         }
-
     }
 }
 

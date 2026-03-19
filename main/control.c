@@ -99,7 +99,7 @@ static pcnt_unit_handle_t encoder_init(int enc_a_gpio, int enc_b_gpio) {
     };
     pcnt_channel_handle_t chan_a = NULL;
     ESP_ERROR_CHECK(pcnt_new_channel(unit, &chan_a_cfg, &chan_a));
-    ESP_ERROR_CHECK(pcnt_channel_set_edge_action(chan_a, PCNT_CHANNEL_EDGE_ACTION_DECREASE, PCNT_CHANNEL_EDGE_ACTION_INCREASE));
+    ESP_ERROR_CHECK(pcnt_channel_set_edge_action(chan_a, PCNT_CHANNEL_EDGE_ACTION_INCREASE, PCNT_CHANNEL_EDGE_ACTION_DECREASE));
     ESP_ERROR_CHECK(pcnt_channel_set_level_action(chan_a, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE));
 
     pcnt_chan_config_t chan_b_cfg = {
@@ -108,7 +108,7 @@ static pcnt_unit_handle_t encoder_init(int enc_a_gpio, int enc_b_gpio) {
     };
     pcnt_channel_handle_t chan_b = NULL;
     ESP_ERROR_CHECK(pcnt_new_channel(unit, &chan_b_cfg, &chan_b));
-    ESP_ERROR_CHECK(pcnt_channel_set_edge_action(chan_b, PCNT_CHANNEL_EDGE_ACTION_INCREASE, PCNT_CHANNEL_EDGE_ACTION_DECREASE));
+    ESP_ERROR_CHECK(pcnt_channel_set_edge_action(chan_b, PCNT_CHANNEL_EDGE_ACTION_DECREASE, PCNT_CHANNEL_EDGE_ACTION_INCREASE));
     ESP_ERROR_CHECK(pcnt_channel_set_level_action(chan_b, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE));
 
     ESP_ERROR_CHECK(pcnt_unit_enable(unit));
@@ -307,8 +307,9 @@ void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty,
         s_prev_time = esp_timer_get_time();
     } else {
         int64_t now = esp_timer_get_time();
-        float dt_sec = (now - s_prev_time) / 1000000.0f;
-        s_prev_time = now;
+        float dt_sec = (float)(now - s_prev_time) / 1000000.0f;
+        if (dt_sec < 1e-6f)
+            dt_sec = 1e-6f;
 
         float v_bat_clamped = fmaxf(s_cached_v_bat, 6.0f);
 
@@ -317,14 +318,17 @@ void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty,
             pcnt_unit_get_count(s_encoders[i], &delta);
             pcnt_unit_clear_count(s_encoders[i]);
 
+            // Flip encoder reading for reversed motors so measurement
+            // matches the logical (pre-reversal) sign convention
             if (s_motor_reversed[i])
                 delta = -delta;
 
-            float measured_rps = (delta / (float)ENCODER_CPR) / dt_sec;
+            float measured_rps = (float)delta / ((float)ENCODER_CPR * dt_sec);
 
             float out = pid_update(&s_pid[i], setpoint_rps[i], measured_rps);
             set_motor(i, out / v_bat_clamped);
         }
+        s_prev_time = now;
     }
 #else
     // Open-loop: map wheel speed to duty cycle [-1, 1] per motor
@@ -356,15 +360,19 @@ void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty,
 }
 
 void control_set_reversed(int motor_idx, bool reversed) {
-    if (motor_idx >= 0 && motor_idx < NUM_MOTORS)
+    if (motor_idx >= 0 && motor_idx < NUM_MOTORS) {
         s_motor_reversed[motor_idx] = reversed;
+#if CONFIG_PERCEPTRON_PID_ENABLED
+        pid_reset(&s_pid[motor_idx]);
+        pcnt_unit_clear_count(s_encoders[motor_idx]);
+#endif
+    }
 }
 
 void control_set_max_motor_hz(int motor_idx, uint32_t hz) {
     if (motor_idx >= 0 && motor_idx < NUM_MOTORS)
         s_max_motor_rps[motor_idx] = (float)hz;
 }
-
 
 void control_set_pid_gains(float kp, float ki) {
 #if CONFIG_PERCEPTRON_PID_ENABLED

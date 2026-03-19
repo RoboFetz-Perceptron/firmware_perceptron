@@ -27,7 +27,7 @@ static uint8_t g_addr_type;
 static bool g_notify_enabled = false;
 
 static StreamBufferHandle_t g_rx_stream = NULL;
-#define RX_QUEUE_SIZE 16
+#define RX_QUEUE_SIZE 32
 #define RX_PKT_SIZE 512
 #define RX_BUFFER_SIZE (RX_PKT_SIZE * RX_QUEUE_SIZE)
 #define ADV_INTERVAL_MIN 0x20
@@ -53,7 +53,7 @@ static int gatt_cb(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt *ct
     uint16_t copy_len = len > sizeof(buf) ? sizeof(buf) : len;
 
     if (ble_hs_mbuf_to_flat(ctxt->om, buf, copy_len, NULL) == 0) {
-        xStreamBufferSend(g_rx_stream, buf, copy_len, 0);
+        xStreamBufferSend(g_rx_stream, buf, copy_len, pdMS_TO_TICKS(50));
     }
 
     return 0;
@@ -124,7 +124,7 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
                 .itvl_min = 6,              // 7.5ms  (units of 1.25ms)
                 .itvl_max = 12,             // 15ms
                 .latency = 0,               // No slave latency for max responsiveness
-                .supervision_timeout = 400, // 4 seconds
+                .supervision_timeout = 2000, // 20 seconds
             };
             ble_gap_update_params(g_conn_handle, &conn_params);
 
