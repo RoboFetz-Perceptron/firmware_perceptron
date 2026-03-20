@@ -143,7 +143,10 @@ static void microros_task(void *arg) {
     if (!s_ble.ready)
         ESP_LOGW(TAG, "BLE not ready after %dms, proceeding anyway", ready_wait);
 
-    vTaskDelay(pdMS_TO_TICKS(200)); // brief settle for CI/DLE
+    // Let BlueZ apply the L2CAP connection parameter update (supervision timeout)
+    // before starting entity creation burst. Without this, a transient BLE hiccup
+    // during the burst can drop the connection on the default (short) timeout.
+    vTaskDelay(pdMS_TO_TICKS(500));
 
     rmw_uros_set_custom_transport(true, &s_ble, ble_transport_open, ble_transport_close, ble_transport_write, ble_transport_read);
 
