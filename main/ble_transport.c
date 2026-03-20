@@ -62,7 +62,7 @@ static int gatt_cb(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt *ct
     uint16_t copy_len = len > sizeof(buf) ? sizeof(buf) : len;
 
     if (ble_hs_mbuf_to_flat(ctxt->om, buf, copy_len, NULL) == 0) {
-        xStreamBufferSend(g_rx_stream, buf, copy_len, pdMS_TO_TICKS(50));
+        xStreamBufferSend(g_rx_stream, buf, copy_len, 0);
     }
 
     return 0;
@@ -158,19 +158,6 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
         if (g_ctx)
             g_ctx->mtu_size = event->mtu.value;
         ESP_LOGI(TAG, "MTU=%d", event->mtu.value);
-
-        // Now that MTU is settled, request fast CI and DLE
-        {
-            struct ble_gap_upd_params conn_params = {
-                .itvl_min = 6,               // 7.5ms  (units of 1.25ms)
-                .itvl_max = 24,              // 30ms   (relaxed for slower adapters)
-                .latency = 0,
-                .supervision_timeout = 2000, // 20 seconds
-            };
-            ble_gap_update_params(g_conn_handle, &conn_params);
-            ble_gap_set_data_len(g_conn_handle, 251, 2120);
-        }
-
         check_and_set_ready();
         break;
 
