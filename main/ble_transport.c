@@ -121,14 +121,10 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
 
             // Request faster connection interval (7.5ms - 15ms) for higher throughput
             struct ble_gap_upd_params conn_params = {
-                .itvl_min = 6,              // 7.5ms  (units of 1.25ms)
-                .itvl_max = 12,             // 15ms
-                .latency = 0,               // No slave latency for max responsiveness
-<<<<<<< Updated upstream
+                .itvl_min = 6,               // 7.5ms  (units of 1.25ms)
+                .itvl_max = 12,              // 15ms
+                .latency = 0,                // No slave latency for max responsiveness
                 .supervision_timeout = 2000, // 20 seconds
-=======
-                .supervision_timeout = 2000, // 20 seconds — gives XRCE-DDS retries time to recover from packet loss
->>>>>>> Stashed changes
             };
             ble_gap_update_params(g_conn_handle, &conn_params);
 
