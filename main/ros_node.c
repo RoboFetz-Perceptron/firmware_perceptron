@@ -291,6 +291,10 @@ bool ros_node_init(ros_queues_t *queues) {
             .bidirectional_mode = false,
 #endif
             .brake_on_stop = true,
+            .motor_kv = 24,       // (24 * 40) + 20 = 980 KV
+            .motor_poles = 14,
+            .startup_power = 120,
+            .auto_advance = true,
         };
         am32_set_desired_settings(&s);
     }

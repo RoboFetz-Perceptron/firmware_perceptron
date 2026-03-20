@@ -46,7 +46,10 @@
 #define EEPROM_OFF_BIDIRECTIONAL 18
 #define EEPROM_OFF_COMP_PWM 20
 #define EEPROM_OFF_STARTUP_POWER 25
+#define EEPROM_OFF_MOTOR_KV 26
+#define EEPROM_OFF_MOTOR_POLES 27
 #define EEPROM_OFF_BRAKE_ON_STOP 28
+#define EEPROM_OFF_AUTO_ADVANCE 47
 
 static am32_settings_t s_desired = {
     .direction_reversed = false,
@@ -56,6 +59,10 @@ static am32_settings_t s_desired = {
     .bidirectional_mode = false,
 #endif
     .brake_on_stop = true,
+    .motor_kv = 24,       // (24 * 40) + 20 = 980 KV
+    .motor_poles = 14,    // 14-pole motor (7 magnet pairs)
+    .startup_power = 120, // Stronger startup for lower-KV motor
+    .auto_advance = true, // Dynamic timing scales with throttle
 };
 
 void am32_set_desired_settings(const am32_settings_t *settings) { s_desired = *settings; }
@@ -284,20 +291,40 @@ esp_err_t am32_configure(const am32_settings_t *settings) {
         ESP_LOGE(TAG, "EEPROM read failed");
         goto cleanup;
     }
-    ESP_LOGI(TAG, "EEPROM: ver=%d.%d name=%.12s dir=%d bidir=%d comp_pwm=%d brake=%d", eeprom[3], eeprom[4], (char *)&eeprom[5], eeprom[EEPROM_OFF_DIR_REVERSED], eeprom[EEPROM_OFF_BIDIRECTIONAL], eeprom[EEPROM_OFF_COMP_PWM], eeprom[EEPROM_OFF_BRAKE_ON_STOP]);
+    ESP_LOGI(TAG, "EEPROM: ver=%d.%d name=%.12s dir=%d bidir=%d comp_pwm=%d startup=%d kv_byte=%d poles=%d brake=%d auto_adv=%d",
+             eeprom[3], eeprom[4], (char *)&eeprom[5],
+             eeprom[EEPROM_OFF_DIR_REVERSED], eeprom[EEPROM_OFF_BIDIRECTIONAL],
+             eeprom[EEPROM_OFF_COMP_PWM], eeprom[EEPROM_OFF_STARTUP_POWER],
+             eeprom[EEPROM_OFF_MOTOR_KV], eeprom[EEPROM_OFF_MOTOR_POLES],
+             eeprom[EEPROM_OFF_BRAKE_ON_STOP], eeprom[EEPROM_OFF_AUTO_ADVANCE]);
 
     uint8_t new_dir = settings->direction_reversed ? 1 : 0;
     uint8_t new_bidir = settings->bidirectional_mode ? 1 : 0;
     uint8_t new_comp_pwm = settings->bidirectional_mode ? 1 : 0; // comp_pwm required for bidirectional
     uint8_t new_brake = settings->brake_on_stop ? 1 : 0;
+    uint8_t new_kv = settings->motor_kv;
+    uint8_t new_poles = settings->motor_poles;
+    uint8_t new_startup = settings->startup_power;
+    uint8_t new_auto_adv = settings->auto_advance ? 1 : 0;
 
-    bool needs_write = (eeprom[EEPROM_OFF_DIR_REVERSED] != new_dir) || (eeprom[EEPROM_OFF_BIDIRECTIONAL] != new_bidir) || (eeprom[EEPROM_OFF_COMP_PWM] != new_comp_pwm) || (eeprom[EEPROM_OFF_BRAKE_ON_STOP] != new_brake);
+    bool needs_write = (eeprom[EEPROM_OFF_DIR_REVERSED] != new_dir)
+                    || (eeprom[EEPROM_OFF_BIDIRECTIONAL] != new_bidir)
+                    || (eeprom[EEPROM_OFF_COMP_PWM] != new_comp_pwm)
+                    || (eeprom[EEPROM_OFF_BRAKE_ON_STOP] != new_brake)
+                    || (eeprom[EEPROM_OFF_MOTOR_KV] != new_kv)
+                    || (eeprom[EEPROM_OFF_MOTOR_POLES] != new_poles)
+                    || (eeprom[EEPROM_OFF_STARTUP_POWER] != new_startup)
+                    || (eeprom[EEPROM_OFF_AUTO_ADVANCE] != new_auto_adv);
 
     if (needs_write) {
         eeprom[EEPROM_OFF_DIR_REVERSED] = new_dir;
         eeprom[EEPROM_OFF_BIDIRECTIONAL] = new_bidir;
         eeprom[EEPROM_OFF_COMP_PWM] = new_comp_pwm;
         eeprom[EEPROM_OFF_BRAKE_ON_STOP] = new_brake;
+        eeprom[EEPROM_OFF_MOTOR_KV] = new_kv;
+        eeprom[EEPROM_OFF_MOTOR_POLES] = new_poles;
+        eeprom[EEPROM_OFF_STARTUP_POWER] = new_startup;
+        eeprom[EEPROM_OFF_AUTO_ADVANCE] = new_auto_adv;
 
         ret = am32_set_address(eeprom_addr);
         if (ret != ESP_OK) {
@@ -310,7 +337,9 @@ esp_err_t am32_configure(const am32_settings_t *settings) {
             ESP_LOGE(TAG, "EEPROM write failed");
             goto cleanup;
         }
-        ESP_LOGI(TAG, "EEPROM updated: dir=%d bidir=%d comp_pwm=%d brake=%d", new_dir, new_bidir, new_comp_pwm, new_brake);
+        ESP_LOGI(TAG, "EEPROM updated: dir=%d bidir=%d comp_pwm=%d startup=%d kv=%d(%dKV) poles=%d brake=%d auto_adv=%d",
+                 new_dir, new_bidir, new_comp_pwm, new_startup,
+                 new_kv, new_kv * 40 + 20, new_poles, new_brake, new_auto_adv);
     } else {
         ESP_LOGI(TAG, "EEPROM already up to date");
     }

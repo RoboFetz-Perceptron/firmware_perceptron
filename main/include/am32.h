@@ -3,11 +3,16 @@
 
 #include <esp_err.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 typedef struct {
     bool direction_reversed;
     bool bidirectional_mode;
     bool brake_on_stop;
+    uint8_t motor_kv;      // EEPROM encoding: actual_kv = (motor_kv * 40) + 20
+    uint8_t motor_poles;   // Number of magnetic poles (count magnets on bell)
+    uint8_t startup_power; // Startup kick strength (50-150, default 100)
+    bool auto_advance;     // Dynamic timing advance based on throttle
 } am32_settings_t;
 
 // Store desired AM32 settings (called from ROS param callbacks)
