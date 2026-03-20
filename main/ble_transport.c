@@ -37,6 +37,15 @@ static StreamBufferHandle_t g_rx_stream = NULL;
 static void start_advertise(void);
 static int gap_event_cb(struct ble_gap_event *event, void *arg);
 
+static void check_and_set_ready(void) {
+    if (g_ctx && g_ctx->connected && g_notify_enabled && g_ctx->mtu_size > 23) {
+        if (!g_ctx->ready) {
+            g_ctx->ready = true;
+            ESP_LOGI(TAG, "BLE ready: MTU=%d, notify=on", g_ctx->mtu_size);
+        }
+    }
+}
+
 static int gatt_cb(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt *ctxt, void *arg) {
     (void)conn;
     (void)attr;
@@ -116,22 +125,10 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
                 g_ctx->conn_id = g_conn_handle;
             }
 
-            // Request MTU exchange for larger packets
+            // Only MTU exchange first — CI and DLE after MTU settles
             ble_gattc_exchange_mtu(g_conn_handle, NULL, NULL);
 
-            // Request faster connection interval (7.5ms - 15ms) for higher throughput
-            struct ble_gap_upd_params conn_params = {
-                .itvl_min = 6,               // 7.5ms  (units of 1.25ms)
-                .itvl_max = 12,              // 15ms
-                .latency = 0,                // No slave latency for max responsiveness
-                .supervision_timeout = 2000, // 20 seconds
-            };
-            ble_gap_update_params(g_conn_handle, &conn_params);
-
-            // Enable Data Length Extension for larger link layer packets
-            ble_gap_set_data_len(g_conn_handle, 251, 2120);
-
-            ESP_LOGI(TAG, "Connected - requesting fast CI and DLE");
+            ESP_LOGI(TAG, "Connected - requesting MTU exchange");
         } else {
             start_advertise();
         }
@@ -140,8 +137,10 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
     case BLE_GAP_EVENT_DISCONNECT:
         g_conn_handle = BLE_HS_CONN_HANDLE_NONE;
         g_notify_enabled = false;
-        if (g_ctx)
+        if (g_ctx) {
             g_ctx->connected = false;
+            g_ctx->ready = false;
+        }
         if (g_rx_stream)
             xStreamBufferReset(g_rx_stream);
         start_advertise();
@@ -149,14 +148,30 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
         break;
 
     case BLE_GAP_EVENT_SUBSCRIBE:
-        if (event->subscribe.attr_handle == g_tx_handle)
+        if (event->subscribe.attr_handle == g_tx_handle) {
             g_notify_enabled = event->subscribe.cur_notify;
+            check_and_set_ready();
+        }
         break;
 
     case BLE_GAP_EVENT_MTU:
         if (g_ctx)
             g_ctx->mtu_size = event->mtu.value;
         ESP_LOGI(TAG, "MTU=%d", event->mtu.value);
+
+        // Now that MTU is settled, request fast CI and DLE
+        {
+            struct ble_gap_upd_params conn_params = {
+                .itvl_min = 6,               // 7.5ms  (units of 1.25ms)
+                .itvl_max = 24,              // 30ms   (relaxed for slower adapters)
+                .latency = 0,
+                .supervision_timeout = 2000, // 20 seconds
+            };
+            ble_gap_update_params(g_conn_handle, &conn_params);
+            ble_gap_set_data_len(g_conn_handle, 251, 2120);
+        }
+
+        check_and_set_ready();
         break;
 
     case BLE_GAP_EVENT_ADV_COMPLETE:
@@ -184,6 +199,7 @@ bool microros_ble_init(ble_transport_ctx_t *ctx) {
         return false;
 
     ctx->connected = false;
+    ctx->ready = false;
     ctx->conn_id = 0;
     ctx->mtu_size = 23;
     g_ctx = ctx;

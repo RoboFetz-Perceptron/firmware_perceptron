@@ -8,6 +8,7 @@
 
 typedef struct {
     bool connected;
+    bool ready;       // true when MTU negotiated AND notifications enabled
     uint16_t conn_id;
     uint16_t mtu_size;
 } ble_transport_ctx_t;

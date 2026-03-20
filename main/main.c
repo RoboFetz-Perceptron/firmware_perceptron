@@ -133,7 +133,17 @@ static void microros_task(void *arg) {
     status_led_set(LED_STATUS_BLE_WAITING);
     while (!s_ble.connected)
         vTaskDelay(pdMS_TO_TICKS(500));
-    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    // Wait for BLE parameters to be fully negotiated (MTU + notifications)
+    int ready_wait = 0;
+    while (!s_ble.ready && s_ble.connected && ready_wait < 10000) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+        ready_wait += 100;
+    }
+    if (!s_ble.ready)
+        ESP_LOGW(TAG, "BLE not ready after %dms, proceeding anyway", ready_wait);
+
+    vTaskDelay(pdMS_TO_TICKS(200)); // brief settle for CI/DLE
 
     rmw_uros_set_custom_transport(true, &s_ble, ble_transport_open, ble_transport_close, ble_transport_write, ble_transport_read);
 
