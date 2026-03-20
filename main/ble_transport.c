@@ -125,11 +125,10 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
                 g_ctx->connected = true;
                 g_ctx->conn_id = g_conn_handle;
             }
-
-            // Only MTU exchange first — CI and DLE after MTU settles
-            ble_gattc_exchange_mtu(g_conn_handle, NULL, NULL);
-
-            ESP_LOGI(TAG, "Connected - requesting MTU exchange");
+            // Don't call ble_gattc_exchange_mtu() here — the central (SimpleBLE)
+            // always initiates MTU exchange during connection. If both sides race,
+            // NimBLE may skip BLE_GAP_EVENT_MTU, leaving mtu_size stuck at 23.
+            ESP_LOGI(TAG, "Connected");
         } else {
             start_advertise();
         }
@@ -153,21 +152,34 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
         if (event->subscribe.attr_handle == g_tx_handle) {
             g_notify_enabled = event->subscribe.cur_notify;
 
-            // Request conn param update on first subscribe. By this point
-            // GATT discovery is done and BlueZ LL procedures (feature exchange,
-            // DLE) are complete, so ble_gap_update_params() won't collide.
-            if (g_notify_enabled && !g_conn_params_updated) {
-                struct ble_gap_upd_params params = {
-                    .itvl_min = 24,             // 30 ms
-                    .itvl_max = 40,             // 50 ms
-                    .latency = 0,
-                    .supervision_timeout = 300, // 3 seconds
-                };
-                int rc = ble_gap_update_params(g_conn_handle, &params);
-                ESP_LOGI(TAG, "Conn param update request: rc=%d", rc);
-                if (rc != 0) {
-                    ESP_LOGW(TAG, "Conn param update failed (rc=%d), proceeding without", rc);
-                    g_conn_params_updated = true;
+            if (g_notify_enabled) {
+                // Safety net: if BLE_GAP_EVENT_MTU didn't fire (can happen
+                // when central and peripheral both initiate MTU exchange),
+                // read the negotiated MTU directly from the ATT layer.
+                if (g_ctx && g_ctx->mtu_size <= 23) {
+                    uint16_t mtu = ble_att_mtu(g_conn_handle);
+                    if (mtu > 23) {
+                        g_ctx->mtu_size = mtu;
+                        ESP_LOGI(TAG, "MTU (from ATT): %d", mtu);
+                    }
+                }
+
+                // Request conn param update on first subscribe. By this point
+                // GATT discovery is done and BlueZ LL procedures (feature exchange,
+                // DLE) are complete, so ble_gap_update_params() won't collide.
+                if (!g_conn_params_updated) {
+                    struct ble_gap_upd_params params = {
+                        .itvl_min = 24,             // 30 ms
+                        .itvl_max = 40,             // 50 ms
+                        .latency = 0,
+                        .supervision_timeout = 300, // 3 seconds
+                    };
+                    int rc = ble_gap_update_params(g_conn_handle, &params);
+                    ESP_LOGI(TAG, "Conn param update request: rc=%d", rc);
+                    if (rc != 0) {
+                        ESP_LOGW(TAG, "Conn param update failed (rc=%d), proceeding without", rc);
+                        g_conn_params_updated = true;
+                    }
                 }
             }
 
