@@ -4,7 +4,6 @@
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/stream_buffer.h>
-#include <nvs_flash.h>
 #include <string.h>
 
 #include "host/ble_hs.h"
@@ -30,7 +29,7 @@ static bool g_notify_enabled = false;
 static StreamBufferHandle_t g_rx_stream = NULL;
 #define RX_QUEUE_SIZE 32
 #define RX_PKT_SIZE 512
-#define RX_BUFFER_SIZE (RX_PKT_SIZE * RX_QUEUE_SIZE * 2)
+#define RX_BUFFER_SIZE (RX_PKT_SIZE * RX_QUEUE_SIZE * 2)  // 32KB, sized for burst XRCE-DDS entity creation
 #define ADV_INTERVAL_MIN 0x20
 #define ADV_INTERVAL_MAX 0x40
 #define TX_CHUNK_DELAY_MS 2
@@ -125,7 +124,7 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
                 g_ctx->connected = true;
                 g_ctx->conn_id = g_conn_handle;
             }
-            // Don't call ble_gattc_exchange_mtu() here — the central (SimpleBLE)
+            // Don't call ble_gattc_exchange_mtu() here - the central (SimpleBLE)
             // always initiates MTU exchange during connection. If both sides race,
             // NimBLE may skip BLE_GAP_EVENT_MTU, leaving mtu_size stuck at 23.
             ESP_LOGI(TAG, "Connected");
@@ -234,16 +233,6 @@ bool microros_ble_init(ble_transport_ctx_t *ctx) {
     ctx->mtu_size = 23;
     g_ctx = ctx;
 
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        nvs_flash_erase();
-        ret = nvs_flash_init();
-    }
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "NVS init failed");
-        return false;
-    }
-
     g_rx_stream = xStreamBufferCreate(RX_BUFFER_SIZE, 1);
     if (!g_rx_stream) {
         ESP_LOGE(TAG, "Stream buffer failed");
@@ -282,6 +271,7 @@ bool microros_ble_init(ble_transport_ctx_t *ctx) {
     return true;
 }
 
+// Required by micro-ROS custom transport API. No-op because BLE is managed by microros_ble_init().
 bool ble_transport_open(struct uxrCustomTransport *transport) {
     (void)transport;
     return true;

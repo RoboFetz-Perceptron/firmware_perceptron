@@ -261,7 +261,7 @@ esp_err_t am32_configure(const am32_settings_t *settings) {
         goto cleanup;
     }
 
-    // Power on ESC — bootloader sees HIGH signal pin and stays resident.
+    // Power on ESC - bootloader sees HIGH signal pin and stays resident.
     // checkForSignal() takes ~50ms, then bootloader has a 20ms serial timeout.
     gpio_set_level(MOTOR_ENABLE_GPIO, 1);
     vTaskDelay(pdMS_TO_TICKS(150));
