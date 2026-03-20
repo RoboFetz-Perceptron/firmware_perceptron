@@ -158,7 +158,25 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
         if (g_ctx)
             g_ctx->mtu_size = event->mtu.value;
         ESP_LOGI(TAG, "MTU=%d", event->mtu.value);
+
+        // Request shorter supervision timeout for faster disconnect detection.
+        // Use relaxed CI values (30-50ms) that BlueZ will accept.
+        struct ble_gap_upd_params params = {
+            .itvl_min = 24,               // 30 ms
+            .itvl_max = 40,               // 50 ms
+            .latency = 0,
+            .supervision_timeout = 300,   // 3 seconds
+        };
+        ble_gap_update_params(g_conn_handle, &params);
+
         check_and_set_ready();
+        break;
+
+    case BLE_GAP_EVENT_CONN_UPDATE:
+        ESP_LOGI(TAG, "Conn updated: itvl=%d, latency=%d, tmo=%d",
+                 event->conn_update.conn.itvl,
+                 event->conn_update.conn.latency,
+                 event->conn_update.supervision_timeout);
         break;
 
     case BLE_GAP_EVENT_ADV_COMPLETE:
