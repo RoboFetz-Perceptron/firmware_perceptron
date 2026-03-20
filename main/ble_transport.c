@@ -25,7 +25,7 @@ static uint16_t g_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static uint16_t g_tx_handle;
 static uint8_t g_addr_type;
 static bool g_notify_enabled = false;
-static bool g_conn_params_updated = false;
+// static bool g_conn_params_updated = false;
 
 static StreamBufferHandle_t g_rx_stream = NULL;
 #define RX_QUEUE_SIZE 32
@@ -39,10 +39,12 @@ static void start_advertise(void);
 static int gap_event_cb(struct ble_gap_event *event, void *arg);
 
 static void check_and_set_ready(void) {
-    if (g_ctx && g_ctx->connected && g_notify_enabled && g_ctx->mtu_size > 23 && g_conn_params_updated) {
+    // Note: g_conn_params_updated removed from condition — supervision timeout
+    // is now set by the agent (central) via hci_le_conn_update(), not the firmware.
+    if (g_ctx && g_ctx->connected && g_notify_enabled && g_ctx->mtu_size > 23) {
         if (!g_ctx->ready) {
             g_ctx->ready = true;
-            ESP_LOGI(TAG, "BLE ready: MTU=%d, notify=on, conn params updated", g_ctx->mtu_size);
+            ESP_LOGI(TAG, "BLE ready: MTU=%d, notify=on", g_ctx->mtu_size);
         }
     }
 }
@@ -137,7 +139,7 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
     case BLE_GAP_EVENT_DISCONNECT:
         g_conn_handle = BLE_HS_CONN_HANDLE_NONE;
         g_notify_enabled = false;
-        g_conn_params_updated = false;
+        // g_conn_params_updated = false;
         if (g_ctx) {
             g_ctx->connected = false;
             g_ctx->ready = false;
@@ -164,23 +166,23 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
                     }
                 }
 
-                // Request conn param update on first subscribe. By this point
-                // GATT discovery is done and BlueZ LL procedures (feature exchange,
-                // DLE) are complete, so ble_gap_update_params() won't collide.
-                if (!g_conn_params_updated) {
-                    struct ble_gap_upd_params params = {
-                        .itvl_min = 24,             // 30 ms
-                        .itvl_max = 40,             // 50 ms
-                        .latency = 0,
-                        .supervision_timeout = 300, // 3 seconds
-                    };
-                    int rc = ble_gap_update_params(g_conn_handle, &params);
-                    ESP_LOGI(TAG, "Conn param update request: rc=%d", rc);
-                    if (rc != 0) {
-                        ESP_LOGW(TAG, "Conn param update failed (rc=%d), proceeding without", rc);
-                        g_conn_params_updated = true;
-                    }
-                }
+                // Conn param update moved to the agent (central) side — the
+                // peripheral's LL_CONNECTION_PARAM_REQ is silently dropped by
+                // some adapters, causing a 40s LL response timeout disconnect.
+                // if (!g_conn_params_updated) {
+                //     struct ble_gap_upd_params params = {
+                //         .itvl_min = 24,             // 30 ms
+                //         .itvl_max = 40,             // 50 ms
+                //         .latency = 0,
+                //         .supervision_timeout = 300, // 3 seconds
+                //     };
+                //     int rc = ble_gap_update_params(g_conn_handle, &params);
+                //     ESP_LOGI(TAG, "Conn param update request: rc=%d", rc);
+                //     if (rc != 0) {
+                //         ESP_LOGW(TAG, "Conn param update failed (rc=%d), proceeding without", rc);
+                //         g_conn_params_updated = true;
+                //     }
+                // }
             }
 
             check_and_set_ready();
@@ -201,14 +203,12 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
             if (ble_gap_conn_find(event->conn_update.conn_handle, &desc) == 0) {
                 ESP_LOGI(TAG, "Conn params updated: itvl=%d, latency=%d, timeout=%d",
                          desc.conn_itvl, desc.conn_latency, desc.supervision_timeout);
-            } else {
-                ESP_LOGI(TAG, "Conn params updated (status=0)");
             }
         } else {
             ESP_LOGW(TAG, "Conn param update rejected: status=%d", status);
         }
-        g_conn_params_updated = true;
-        check_and_set_ready();
+        // g_conn_params_updated = true;
+        // check_and_set_ready();
         break;
     }
 
