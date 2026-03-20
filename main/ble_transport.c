@@ -173,10 +173,7 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
         break;
 
     case BLE_GAP_EVENT_CONN_UPDATE:
-        ESP_LOGI(TAG, "Conn updated: itvl=%d, latency=%d, tmo=%d",
-                 event->conn_update.conn.itvl,
-                 event->conn_update.conn.latency,
-                 event->conn_update.supervision_timeout);
+        ESP_LOGI(TAG, "Conn updated: status=%d", event->conn_update.status);
         break;
 
     case BLE_GAP_EVENT_ADV_COMPLETE:
