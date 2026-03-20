@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "host/ble_hs.h"
+#include "host/ble_l2cap.h"
 #include "host/util/util.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
@@ -25,7 +26,6 @@ static uint16_t g_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static uint16_t g_tx_handle;
 static uint8_t g_addr_type;
 static bool g_notify_enabled = false;
-// static bool g_conn_params_updated = false;
 
 static StreamBufferHandle_t g_rx_stream = NULL;
 #define RX_QUEUE_SIZE 32
@@ -39,8 +39,6 @@ static void start_advertise(void);
 static int gap_event_cb(struct ble_gap_event *event, void *arg);
 
 static void check_and_set_ready(void) {
-    // Note: g_conn_params_updated removed from condition — supervision timeout
-    // is now set by the agent (central) via hci_le_conn_update(), not the firmware.
     if (g_ctx && g_ctx->connected && g_notify_enabled && g_ctx->mtu_size > 23) {
         if (!g_ctx->ready) {
             g_ctx->ready = true;
@@ -139,7 +137,6 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
     case BLE_GAP_EVENT_DISCONNECT:
         g_conn_handle = BLE_HS_CONN_HANDLE_NONE;
         g_notify_enabled = false;
-        // g_conn_params_updated = false;
         if (g_ctx) {
             g_ctx->connected = false;
             g_ctx->ready = false;
@@ -166,23 +163,20 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
                     }
                 }
 
-                // Conn param update moved to the agent (central) side — the
-                // peripheral's LL_CONNECTION_PARAM_REQ is silently dropped by
-                // some adapters, causing a 40s LL response timeout disconnect.
-                // if (!g_conn_params_updated) {
-                //     struct ble_gap_upd_params params = {
-                //         .itvl_min = 24,             // 30 ms
-                //         .itvl_max = 40,             // 50 ms
-                //         .latency = 0,
-                //         .supervision_timeout = 300, // 3 seconds
-                //     };
-                //     int rc = ble_gap_update_params(g_conn_handle, &params);
-                //     ESP_LOGI(TAG, "Conn param update request: rc=%d", rc);
-                //     if (rc != 0) {
-                //         ESP_LOGW(TAG, "Conn param update failed (rc=%d), proceeding without", rc);
-                //         g_conn_params_updated = true;
-                //     }
-                // }
+                // Request 3s supervision timeout via L2CAP (not LL) to avoid
+                // LL response timeout on adapters that don't handle LL updates.
+                struct ble_l2cap_sig_update_params l2cap_params = {
+                    .itvl_min = 24,              // 30 ms
+                    .itvl_max = 40,              // 50 ms
+                    .slave_latency = 0,
+                    .timeout_multiplier = 300,   // 3 seconds
+                };
+                int rc = ble_l2cap_sig_update(g_conn_handle, &l2cap_params, NULL, NULL);
+                if (rc == 0) {
+                    ESP_LOGI(TAG, "L2CAP conn param update requested");
+                } else {
+                    ESP_LOGW(TAG, "L2CAP conn param update failed: rc=%d", rc);
+                }
             }
 
             check_and_set_ready();
@@ -207,8 +201,6 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
         } else {
             ESP_LOGW(TAG, "Conn param update rejected: status=%d", status);
         }
-        // g_conn_params_updated = true;
-        // check_and_set_ready();
         break;
     }
 
