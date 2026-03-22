@@ -10,20 +10,20 @@
 #define NUM_MOTORS 3
 
 // Motor H-bridge GPIO pins
-#define MOTOR1_IN1_GPIO 3
-#define MOTOR1_IN2_GPIO 2
-#define MOTOR2_IN1_GPIO 21
-#define MOTOR2_IN2_GPIO 22
-#define MOTOR3_IN1_GPIO 23
-#define MOTOR3_IN2_GPIO 15
+#define MOTOR1_IN1_GPIO 23
+#define MOTOR1_IN2_GPIO 15
+#define MOTOR2_IN1_GPIO 3
+#define MOTOR2_IN2_GPIO 2
+#define MOTOR3_IN1_GPIO 21
+#define MOTOR3_IN2_GPIO 22
 
 // Encoder GPIO pins (quadrature A/B per motor)
-#define MOTOR1_ENC_A_GPIO 19
-#define MOTOR1_ENC_B_GPIO 20
-#define MOTOR2_ENC_A_GPIO 18
-#define MOTOR2_ENC_B_GPIO 11
-#define MOTOR3_ENC_A_GPIO 4
-#define MOTOR3_ENC_B_GPIO 5
+#define MOTOR1_ENC_A_GPIO 4
+#define MOTOR1_ENC_B_GPIO 5
+#define MOTOR2_ENC_A_GPIO 19
+#define MOTOR2_ENC_B_GPIO 20
+#define MOTOR3_ENC_A_GPIO 18
+#define MOTOR3_ENC_B_GPIO 11
 
 #define WEAPON_PWM_GPIO 0
 #define MOTOR_ENABLE_GPIO 13
