@@ -326,6 +326,9 @@ void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty,
             float measured_rps = (float)delta / ((float)ENCODER_CPR * dt_sec);
 
             float out = pid_update(&s_pid[i], setpoint_rps[i], measured_rps);
+
+            // ESP_LOGW("CTR_DEBUG", "m%d: delta: %d setpoint_rps: %f measured_rps: %f", i, delta, setpoint_rps[i], measured_rps);
+
             set_motor(i, out / v_bat_clamped);
         }
         s_prev_time = now;

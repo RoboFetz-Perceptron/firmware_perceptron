@@ -18,12 +18,12 @@
 #define MOTOR3_IN2_GPIO 15
 
 // Encoder GPIO pins (quadrature A/B per motor)
-#define MOTOR1_ENC_A_GPIO 20
-#define MOTOR1_ENC_B_GPIO 19
+#define MOTOR1_ENC_A_GPIO 19
+#define MOTOR1_ENC_B_GPIO 20
 #define MOTOR2_ENC_A_GPIO 18
-#define MOTOR2_ENC_B_GPIO 9
-#define MOTOR3_ENC_A_GPIO 5
-#define MOTOR3_ENC_B_GPIO 4
+#define MOTOR2_ENC_B_GPIO 11
+#define MOTOR3_ENC_A_GPIO 4
+#define MOTOR3_ENC_B_GPIO 5
 
 #define WEAPON_PWM_GPIO 0
 #define MOTOR_ENABLE_GPIO 13
