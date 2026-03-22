@@ -14,7 +14,9 @@
         },
         "microxrcedds_client":{
             "cmake-args": [
-                "-DUCLIENT_CUSTOM_TRANSPORT_MTU=1024"
+                "-DUCLIENT_CUSTOM_TRANSPORT_MTU=1024",
+                "-DUCLIENT_MIN_HEARTBEAT_TIME_INTERVAL=500",
+                "-DUCLIENT_MIN_SESSION_CONNECTION_INTERVAL=500"
             ]
         }
     }

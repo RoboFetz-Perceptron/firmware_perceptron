@@ -14,6 +14,7 @@ typedef struct {
 } ros_queues_t;
 
 bool ros_node_init(ros_queues_t *queues);
+void ros_node_fini(void);
 void ros_node_spin(void);
 void ros_node_publish_battery(float voltage);
 bool ros_node_time_sync(void);

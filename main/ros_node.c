@@ -235,6 +235,18 @@ static bool on_param_changed(const Parameter *old_p, const Parameter *new_p, voi
     return false;
 }
 
+void ros_node_fini(void) {
+    rclc_executor_fini(&s_exec);
+    rcl_publisher_fini(&s_pub_battery, &s_node);
+    rcl_subscription_fini(&s_sub_cmd_vel, &s_node);
+    rcl_subscription_fini(&s_sub_weapon, &s_node);
+    rcl_subscription_fini(&s_sub_flipped, &s_node);
+    rcl_subscription_fini(&s_sub_estop, &s_node);
+    rcl_service_fini(&s_srv_calibrate, &s_node);
+    rcl_node_fini(&s_node);
+    rclc_support_fini(&s_support);
+}
+
 bool ros_node_init(ros_queues_t *queues) {
     s_queues = queues;
 

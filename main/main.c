@@ -162,8 +162,31 @@ static void microros_task(void *arg) {
     }
 
     vTaskDelay(pdMS_TO_TICKS(500));
-    if (!ros_node_init(&s_queues)) {
-        ESP_LOGE(TAG, "ROS init failed");
+    bool ros_ok = false;
+    for (int attempt = 1; attempt <= 3; attempt++) {
+        if (ros_node_init(&s_queues)) {
+            ros_ok = true;
+            break;
+        }
+        ESP_LOGW(TAG, "ROS init failed (attempt %d/3)", attempt);
+        ros_node_fini();
+        if (attempt < 3) {
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            status_led_set(LED_STATUS_AGENT_WAITING);
+            while (rmw_uros_ping_agent(5000, 1) != RMW_RET_OK) {
+                if (!s_ble.connected) {
+                    status_led_set(LED_STATUS_BLE_WAITING);
+                    while (!s_ble.connected)
+                        vTaskDelay(pdMS_TO_TICKS(500));
+                    status_led_set(LED_STATUS_AGENT_WAITING);
+                }
+                vTaskDelay(pdMS_TO_TICKS(1000));
+            }
+            vTaskDelay(pdMS_TO_TICKS(500));
+        }
+    }
+    if (!ros_ok) {
+        ESP_LOGE(TAG, "ROS init failed after 3 attempts");
         status_led_set(LED_STATUS_ERROR);
         vTaskDelay(pdMS_TO_TICKS(500));
         esp_restart();
