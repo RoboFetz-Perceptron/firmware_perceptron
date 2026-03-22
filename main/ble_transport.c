@@ -33,6 +33,9 @@ static StreamBufferHandle_t g_rx_stream = NULL;
 #define ADV_INTERVAL_MIN 0x20
 #define ADV_INTERVAL_MAX 0x40
 #define TX_CHUNK_DELAY_MS 2
+#define CONN_INTERVAL_MIN 6   // 6 * 1.25ms = 7.5ms
+#define CONN_INTERVAL_MAX 12  // 12 * 1.25ms = 15ms
+#define CONN_SUPERVISION_TIMEOUT 300 // ~3s
 
 static void start_advertise(void);
 static int gap_event_cb(struct ble_gap_event *event, void *arg);
@@ -165,10 +168,10 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
                 // Request 3s supervision timeout via L2CAP (not LL) to avoid
                 // LL response timeout on adapters that don't handle LL updates.
                 struct ble_l2cap_sig_update_params l2cap_params = {
-                    .itvl_min = 24,              // 30 ms
-                    .itvl_max = 40,              // 50 ms
+                    .itvl_min = CONN_INTERVAL_MIN,
+                    .itvl_max = CONN_INTERVAL_MAX,
                     .slave_latency = 0,
-                    .timeout_multiplier = 300,   // 3 seconds
+                    .timeout_multiplier = CONN_SUPERVISION_TIMEOUT,
                 };
                 int rc = ble_l2cap_sig_update(g_conn_handle, &l2cap_params, NULL, NULL);
                 if (rc == 0) {
