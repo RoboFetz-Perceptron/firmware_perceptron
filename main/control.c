@@ -5,16 +5,14 @@
 #include <driver/gpio.h>
 #include <driver/ledc.h>
 #include <driver/mcpwm_prelude.h>
+#include <driver/pulse_cnt.h>
 #include <esp_adc/adc_cali.h>
 #include <esp_adc/adc_cali_scheme.h>
 #include <esp_adc/adc_oneshot.h>
 #include <esp_log.h>
-
-#if CONFIG_PERCEPTRON_PID_ENABLED
-#include "include/pid.h"
-#include <driver/pulse_cnt.h>
 #include <esp_timer.h>
-#endif
+
+#include "include/pid.h"
 
 #define TAG "PERCEPTRON"
 
@@ -28,11 +26,10 @@ static mcpwm_cmpr_handle_t s_comparators[NUM_MOTORS];
 static mcpwm_gen_handle_t s_gen_in1[NUM_MOTORS];
 static mcpwm_gen_handle_t s_gen_in2[NUM_MOTORS];
 
-#if CONFIG_PERCEPTRON_PID_ENABLED
 static pcnt_unit_handle_t s_encoders[NUM_MOTORS];
 static pid_state_t s_pid[NUM_MOTORS];
 static int64_t s_prev_time;
-#endif
+static float s_measured_rps[NUM_MOTORS];
 
 // Motor config
 static bool s_motor_reversed[NUM_MOTORS] = {false, false, false};
@@ -53,10 +50,8 @@ static volatile float s_cached_v_bat = PID_NOMINAL_VOLTAGE;
 static const int s_in1_pins[] = {MOTOR1_IN1_GPIO, MOTOR2_IN1_GPIO, MOTOR3_IN1_GPIO};
 static const int s_in2_pins[] = {MOTOR1_IN2_GPIO, MOTOR2_IN2_GPIO, MOTOR3_IN2_GPIO};
 
-#if CONFIG_PERCEPTRON_PID_ENABLED
 static const int s_enc_a_pins[] = {MOTOR1_ENC_A_GPIO, MOTOR2_ENC_A_GPIO, MOTOR3_ENC_A_GPIO};
 static const int s_enc_b_pins[] = {MOTOR1_ENC_B_GPIO, MOTOR2_ENC_B_GPIO, MOTOR3_ENC_B_GPIO};
-#endif
 
 // Set motor duty: speed -1.0 (full reverse) to +1.0 (full forward), 0.0 = brake
 // motor_reversed flips direction for physically reversed motors
@@ -80,7 +75,6 @@ static void set_motor(int idx, float speed) {
     }
 }
 
-#if CONFIG_PERCEPTRON_PID_ENABLED
 static pcnt_unit_handle_t encoder_init(int enc_a_gpio, int enc_b_gpio) {
     pcnt_unit_config_t unit_cfg = {
         .high_limit = 10000,
@@ -117,7 +111,6 @@ static pcnt_unit_handle_t encoder_init(int enc_a_gpio, int enc_b_gpio) {
 
     return unit;
 }
-#endif
 
 void control_weapon_ledc_init(void) {
     ledc_timer_config_t ledc_timer = {
@@ -193,7 +186,6 @@ esp_err_t control_init(void) {
         ESP_ERROR_CHECK(mcpwm_timer_start_stop(s_timers[i], MCPWM_TIMER_START_NO_STOP));
     }
 
-#if CONFIG_PERCEPTRON_PID_ENABLED
     for (int i = 0; i < NUM_MOTORS; i++)
         s_encoders[i] = encoder_init(s_enc_a_pins[i], s_enc_b_pins[i]);
 
@@ -210,7 +202,6 @@ esp_err_t control_init(void) {
         };
     }
     s_prev_time = esp_timer_get_time();
-#endif
 
     control_weapon_ledc_init();
 
@@ -235,11 +226,7 @@ esp_err_t control_init(void) {
     };
     ESP_ERROR_CHECK(adc_cali_create_scheme_curve_fitting(&cali_cfg, &s_adc_cali_handle));
 
-#if CONFIG_PERCEPTRON_PID_ENABLED
-    ESP_LOGI(TAG, "HW init OK (PID enabled)");
-#else
-    ESP_LOGI(TAG, "HW init OK (open-loop)");
-#endif
+    ESP_LOGI(TAG, "HW init OK (closed-loop)");
     return ESP_OK;
 }
 
@@ -288,7 +275,6 @@ void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty,
             u_ms[i] *= scale;
     }
 
-#if CONFIG_PERCEPTRON_PID_ENABLED
     // Convert to wheel RPS (setpoint for PID)
     float setpoint_rps[NUM_MOTORS];
     bool all_zero = true;
@@ -302,6 +288,7 @@ void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty,
         for (int i = 0; i < NUM_MOTORS; i++) {
             pid_reset(&s_pid[i]);
             set_motor(i, 0.0f);
+            s_measured_rps[i] = 0.0f;
             pcnt_unit_clear_count(s_encoders[i]);
         }
         s_prev_time = esp_timer_get_time();
@@ -324,22 +311,14 @@ void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty,
                 delta = -delta;
 
             float measured_rps = (float)delta / ((float)ENCODER_CPR * dt_sec);
+            s_measured_rps[i] = measured_rps;
 
             float out = pid_update(&s_pid[i], setpoint_rps[i], measured_rps);
-
-            // ESP_LOGW("CTR_DEBUG", "m%d: delta: %d setpoint_rps: %f measured_rps: %f", i, delta, setpoint_rps[i], measured_rps);
 
             set_motor(i, out / v_bat_clamped);
         }
         s_prev_time = now;
     }
-#else
-    // Open-loop: map wheel speed to duty cycle [-1, 1] per motor
-    for (int i = 0; i < NUM_MOTORS; i++) {
-        float limit = s_max_motor_rps[i] * WHEEL_RADIUS_M * 2.0f * (float)M_PI;
-        set_motor(i, u_ms[i] / limit);
-    }
-#endif
 
 #if CONFIG_PERCEPTRON_WEAPON_BIDIRECTIONAL
     // Bidirectional ESC: 1500µs=stop, forward/reverse around center
@@ -365,10 +344,8 @@ void control_update(const geometry_msgs__msg__Twist *twist, uint8_t weapon_duty,
 void control_set_reversed(int motor_idx, bool reversed) {
     if (motor_idx >= 0 && motor_idx < NUM_MOTORS) {
         s_motor_reversed[motor_idx] = reversed;
-#if CONFIG_PERCEPTRON_PID_ENABLED
         pid_reset(&s_pid[motor_idx]);
         pcnt_unit_clear_count(s_encoders[motor_idx]);
-#endif
     }
 }
 
@@ -378,25 +355,23 @@ void control_set_max_motor_hz(int motor_idx, uint32_t hz) {
 }
 
 void control_set_pid_gains(float kp, float ki) {
-#if CONFIG_PERCEPTRON_PID_ENABLED
     for (int i = 0; i < NUM_MOTORS; i++) {
         s_pid[i].kp = kp;
         s_pid[i].ki = ki;
     }
-#else
-    (void)kp;
-    (void)ki;
-#endif
 }
 
 void control_pid_reset(void) {
-#if CONFIG_PERCEPTRON_PID_ENABLED
     for (int i = 0; i < NUM_MOTORS; i++) {
         pid_reset(&s_pid[i]);
         pcnt_unit_clear_count(s_encoders[i]);
     }
     s_prev_time = esp_timer_get_time();
-#endif
+}
+
+void control_get_measured_rps(float out_rps[NUM_MOTORS]) {
+    for (int i = 0; i < NUM_MOTORS; i++)
+        out_rps[i] = s_measured_rps[i];
 }
 
 void control_update_battery_voltage(void) { s_cached_v_bat = control_read_battery_voltage(); }

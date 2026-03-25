@@ -65,5 +65,6 @@ void control_set_reversed(int motor_idx, bool reversed);
 void control_set_pid_gains(float kp, float ki);
 void control_pid_reset(void);
 void control_update_battery_voltage(void);
+void control_get_measured_rps(float out_rps[NUM_MOTORS]);
 
 #endif

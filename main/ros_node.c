@@ -202,7 +202,6 @@ static bool on_param_changed(const Parameter *old_p, const Parameter *new_p, voi
         int64_t val = new_p->value.integer_value;
         const char *name = new_p->name.data;
 
-#if CONFIG_PERCEPTRON_PID_ENABLED
         bool is_kp = strcmp(name, PARAM_PID_KP) == 0;
         bool is_ki = strcmp(name, PARAM_PID_KI) == 0;
         if (is_kp || is_ki) {
@@ -218,7 +217,6 @@ static bool on_param_changed(const Parameter *old_p, const Parameter *new_p, voi
             ESP_LOGI(TAG, "PID %s=%d (%.3f)", name, (int)val, val / 1000.0f);
             return true;
         }
-#endif
 
         for (int i = 0; i < NUM_MOTORS; i++) {
             if (strcmp(name, s_motor_max_hz_names[i]) == 0) {
@@ -275,7 +273,6 @@ bool ros_node_init(ros_queues_t *queues) {
         control_set_reversed(i, saved);
     }
 
-#if CONFIG_PERCEPTRON_PID_ENABLED
     {
         int32_t kp_x1000 = nvs_load_i32(PARAM_PID_KP, 3200);  // default 3.2
         int32_t ki_x1000 = nvs_load_i32(PARAM_PID_KI, 80000);  // default 80.0
@@ -285,7 +282,6 @@ bool ros_node_init(ros_queues_t *queues) {
         RCCHECK(rclc_parameter_set_int(&s_params, PARAM_PID_KI, ki_x1000));
         control_set_pid_gains(kp_x1000 / 1000.0f, ki_x1000 / 1000.0f);
     }
-#endif
 
     for (int i = 0; i < NUM_MOTORS; i++) {
         int32_t hz = nvs_load_i32(s_motor_max_hz_names[i], CONFIG_PERCEPTRON_MAX_MOTOR_HZ);

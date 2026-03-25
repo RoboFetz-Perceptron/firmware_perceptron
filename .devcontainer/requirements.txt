@@ -3,5 +3,4 @@ lark-parser
 colcon-common-extensions
 importlib-resources
 empy
-odrive
 python-can
