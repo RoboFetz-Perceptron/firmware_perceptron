@@ -17,14 +17,6 @@
 #define MOTOR3_IN1_GPIO 23
 #define MOTOR3_IN2_GPIO 15
 
-// Encoder GPIO pins (quadrature A/B per motor)
-#define MOTOR1_ENC_A_GPIO 19
-#define MOTOR1_ENC_B_GPIO 20
-#define MOTOR2_ENC_A_GPIO 18
-#define MOTOR2_ENC_B_GPIO 11
-#define MOTOR3_ENC_A_GPIO 4
-#define MOTOR3_ENC_B_GPIO 5
-
 #define WEAPON_PWM_GPIO 0
 #define MOTOR_ENABLE_GPIO 13
 #define BATTERY_ADC_GPIO 1
@@ -32,7 +24,7 @@
 
 #define MOTOR_MCPWM_GROUP_ID 0
 #define MOTOR_MCPWM_RESOLUTION_HZ 10000000
-#define MOTOR_MCPWM_FREQ_HZ 25000
+#define MOTOR_MCPWM_FREQ_HZ 5000
 
 #define WEAPON_LEDC_TIMER LEDC_TIMER_0
 #define WEAPON_LEDC_CHANNEL LEDC_CHANNEL_0
@@ -49,10 +41,6 @@
 // Physical constants from Kconfig (integer mm -> float m)
 #define ROBOT_RADIUS_M (CONFIG_PERCEPTRON_ROBOT_RADIUS_MM / 1000.0f)
 #define WHEEL_RADIUS_M (CONFIG_PERCEPTRON_WHEEL_RADIUS_MM / 1000.0f)
-#define ENCODER_CPR CONFIG_PERCEPTRON_ENCODER_CPR
-
-// PID output range matches nominal battery voltage
-#define PID_NOMINAL_VOLTAGE 12.0f
 
 esp_err_t control_init(void);
 void control_set_enabled(bool enabled);
@@ -62,8 +50,6 @@ void control_weapon_ledc_deinit(void);
 void control_weapon_ledc_init(void);
 void control_set_max_motor_hz(int motor_idx, uint32_t hz);
 void control_set_reversed(int motor_idx, bool reversed);
-void control_set_pid_gains(float kp, float ki);
-void control_pid_reset(void);
-void control_update_battery_voltage(void);
+void control_set_min_duty(float duty);
 
 #endif

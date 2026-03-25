@@ -96,7 +96,6 @@ static void controller_task(void *arg) {
                 } else if (!estop.data && estop_active) {
                     xQueueReset(s_queues.weapon);
                     weapon.data = 0;
-                    control_pid_reset();
                     control_set_enabled(true);
                     estop_release_time = esp_timer_get_time();
                     status_led_set(LED_STATUS_CONNECTED);
@@ -118,14 +117,6 @@ static void controller_task(void *arg) {
     }
 }
 
-static void housekeeping_task(void *arg) {
-    (void)arg;
-
-    while (true) {
-        control_update_battery_voltage();
-        vTaskDelay(pdMS_TO_TICKS(500));
-    }
-}
 
 static void microros_task(void *arg) {
     (void)arg;
@@ -269,5 +260,4 @@ void app_main(void) {
 
     xTaskCreate(controller_task, "controller", 8192, NULL, 5, NULL);
     xTaskCreate(microros_task, "microros", 16384, NULL, 4, NULL);
-    xTaskCreate(housekeeping_task, "housekeeping", 4096, NULL, 3, NULL);
 }

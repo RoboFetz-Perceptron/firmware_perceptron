@@ -48,7 +48,7 @@ Flip mode (inverts drive when robot is upside down):
 ros2 topic pub --once /perceptron/is_flipped std_msgs/msg/Bool "data: true"
 ```
 
-ESC throttle calibration (only tested with one ESC so far):
+ESC throttle calibration (only tested with one ACM32 ESC so far):
 ```bash
 ros2 service call /perceptron/calibrate_esc std_srvs/srv/Trigger
 ```

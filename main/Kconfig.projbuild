@@ -10,7 +10,7 @@ menu "Perceptron"
 
     config PERCEPTRON_BLE_DEVICE_NAME
         string "BLE device name"
-        default "Perceptron"
+        default "Perceptron_OL"
 
     config PERCEPTRON_CONTROLLER_PERIOD_MS
         int "Controller loop period (ms)"
@@ -42,21 +42,6 @@ menu "Perceptron"
             Default maximum motor speed in revolutions per second.
             Used as initial value for all motors. Can be overridden
             per motor at runtime via ROS parameters.
-
-    config PERCEPTRON_PID_ENABLED
-        bool "Enable PID motor speed control (requires encoders)"
-        default n
-        help
-            When enabled, motors use closed-loop PID with encoder feedback.
-            When disabled, cmd_vel maps directly to PWM duty (open-loop).
-
-    config PERCEPTRON_ENCODER_CPR
-        int "Encoder counts per revolution"
-        depends on PERCEPTRON_PID_ENABLED
-        default 4200
-        range 100 65535
-        help
-            Full quadrature counts per revolution (PPR * 4).
 
     config PERCEPTRON_CMD_VEL_TIMEOUT_MS
         int "cmd_vel timeout (ms)"

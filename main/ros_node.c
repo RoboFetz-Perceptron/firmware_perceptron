@@ -35,11 +35,10 @@
 #define PARAM_MOTOR1_REVERSED "motor1_reversed"
 #define PARAM_MOTOR2_REVERSED "motor2_reversed"
 #define PARAM_MOTOR3_REVERSED "motor3_reversed"
-#define PARAM_PID_KP "pid_kp_x1000"
-#define PARAM_PID_KI "pid_ki_x1000"
 #define PARAM_MOTOR1_MAX_HZ "motor1_max_hz"
 #define PARAM_MOTOR2_MAX_HZ "motor2_max_hz"
 #define PARAM_MOTOR3_MAX_HZ "motor3_max_hz"
+#define PARAM_MIN_DUTY "min_duty_pct"
 #define NVS_NAMESPACE "perceptron"
 
 #define SPIN_TIMEOUT_MS 100
@@ -202,23 +201,14 @@ static bool on_param_changed(const Parameter *old_p, const Parameter *new_p, voi
         int64_t val = new_p->value.integer_value;
         const char *name = new_p->name.data;
 
-#if CONFIG_PERCEPTRON_PID_ENABLED
-        bool is_kp = strcmp(name, PARAM_PID_KP) == 0;
-        bool is_ki = strcmp(name, PARAM_PID_KI) == 0;
-        if (is_kp || is_ki) {
-            if (val < 0 || val > 500000)
+        if (strcmp(name, PARAM_MIN_DUTY) == 0) {
+            if (val < 0 || val > 100)
                 return false;
             nvs_save_i32(name, (int32_t)val);
-            int64_t kp_val, ki_val;
-            rclc_parameter_get_int(&s_params, PARAM_PID_KP, &kp_val);
-            rclc_parameter_get_int(&s_params, PARAM_PID_KI, &ki_val);
-            if (is_kp) kp_val = val;
-            if (is_ki) ki_val = val;
-            control_set_pid_gains(kp_val / 1000.0f, ki_val / 1000.0f);
-            ESP_LOGI(TAG, "PID %s=%d (%.3f)", name, (int)val, val / 1000.0f);
+            control_set_min_duty((float)val);
+            ESP_LOGI(TAG, "min_duty=%d%%", (int)val);
             return true;
         }
-#endif
 
         for (int i = 0; i < NUM_MOTORS; i++) {
             if (strcmp(name, s_motor_max_hz_names[i]) == 0) {
@@ -275,17 +265,12 @@ bool ros_node_init(ros_queues_t *queues) {
         control_set_reversed(i, saved);
     }
 
-#if CONFIG_PERCEPTRON_PID_ENABLED
     {
-        int32_t kp_x1000 = nvs_load_i32(PARAM_PID_KP, 3200);  // default 3.2
-        int32_t ki_x1000 = nvs_load_i32(PARAM_PID_KI, 80000);  // default 80.0
-        RCCHECK(rclc_add_parameter(&s_params, PARAM_PID_KP, RCLC_PARAMETER_INT));
-        RCCHECK(rclc_parameter_set_int(&s_params, PARAM_PID_KP, kp_x1000));
-        RCCHECK(rclc_add_parameter(&s_params, PARAM_PID_KI, RCLC_PARAMETER_INT));
-        RCCHECK(rclc_parameter_set_int(&s_params, PARAM_PID_KI, ki_x1000));
-        control_set_pid_gains(kp_x1000 / 1000.0f, ki_x1000 / 1000.0f);
+        int32_t min_duty = nvs_load_i32(PARAM_MIN_DUTY, 0);
+        RCCHECK(rclc_add_parameter(&s_params, PARAM_MIN_DUTY, RCLC_PARAMETER_INT));
+        RCCHECK(rclc_parameter_set_int(&s_params, PARAM_MIN_DUTY, min_duty));
+        control_set_min_duty((float)min_duty);
     }
-#endif
 
     for (int i = 0; i < NUM_MOTORS; i++) {
         int32_t hz = nvs_load_i32(s_motor_max_hz_names[i], CONFIG_PERCEPTRON_MAX_MOTOR_HZ);
